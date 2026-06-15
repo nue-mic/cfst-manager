@@ -20,9 +20,10 @@ const (
 	DefaultDownloadTime = 10 // 秒
 	DefaultTCPPort      = 443
 	// Cloudflare 官方测速端点：本身托管在 Cloudflare 上，强制连到候选 IP 即可测出
-	// 该边缘的真实下载速度。原 CFST 默认的 cf.xiu2.xyz/url 是共享占位地址（常 403/限速/
-	// 小文件），会导致下载测速结果偏低失真，故改用此端点（bytes=200MB 确保不会过早下完）。
-	DefaultURL = "https://speed.cloudflare.com/__down?bytes=200000000"
+	// 该边缘真实下载速度。原 CFST 默认的 cf.xiu2.xyz/url 是共享占位地址（常 403/限速）。
+	// 实测：bytes>=100MB 在部分线路(如国内 IPv6→海外节点)会被 Cloudflare 直接拒成 403，
+	// 而 50MB 稳定可用，故默认用 50MB（高带宽服务器可在 UI 下拉改 100/200MB）。
+	DefaultURL = "https://speed.cloudflare.com/__down?bytes=50000000"
 	DefaultMaxDelay     = 9999 // ms
 	DefaultMinDelay     = 0    // ms
 	DefaultMaxLossRate  = 1.0

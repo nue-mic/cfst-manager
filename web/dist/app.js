@@ -217,18 +217,17 @@ function topbar(title, sub, actions = '') {
 // ============================================================
 // 页面：测速优选
 // ============================================================
-const ENGINE_DEFAULTS = { routines: 200, ping_times: 4, tcp_port: 443, httping: false, httping_status_code: 0, httping_cf_colo: '', test_count: 10, download_time: 10, url: 'https://speed.cloudflare.com/__down?bytes=200000000', min_speed: 0, disable: false, max_delay: 9999, min_delay: 0, max_loss_rate: 1, test_all: false };
+const ENGINE_DEFAULTS = { routines: 200, ping_times: 4, tcp_port: 443, httping: false, httping_status_code: 0, httping_cf_colo: '', test_count: 10, download_time: 10, url: 'https://speed.cloudflare.com/__down?bytes=50000000', min_speed: 0, disable: false, max_delay: 9999, min_delay: 0, max_loss_rate: 1, test_all: false };
 
 // 下载测速地址预设。测速地址须托管在被优选的 CDN 上（优选 Cloudflare 就用 Cloudflare 地址），
 // 这样强制连候选 IP 才能测出该边缘真实速度。多备几个：大文件被限流时可换小的/换域名。
 // speed.cloudflare.com 是 Cloudflare 官方测速基础设施，最稳；公共地址都可能限额，最稳是自建(CF Workers)。
 const SPEED_URL_PRESETS = [
-  { v: 'https://speed.cloudflare.com/__down?bytes=200000000', t: 'Cloudflare 官方 · 200MB（快速链路·推荐）' },
-  { v: 'https://speed.cloudflare.com/__down?bytes=100000000', t: 'Cloudflare 官方 · 100MB（通用）' },
-  { v: 'https://speed.cloudflare.com/__down?bytes=50000000',  t: 'Cloudflare 官方 · 50MB（慢速链路/快速测试）' },
-  { v: 'https://speed.cloudflare.com/__down?bytes=10000000',  t: 'Cloudflare 官方 · 10MB（低带宽/路由器）' },
-  { v: 'https://cloudflaremirrors.com/archlinux/iso/latest/archlinux-x86_64.iso', t: 'Cloudflare 镜像站（备用·不同域名·大文件）' },
-  { v: 'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js', t: 'cdnjs（Cloudflare 备用·小文件/连通性）' },
+  { v: 'https://speed.cloudflare.com/__down?bytes=50000000',  t: 'Cloudflare 官方 · 50MB（推荐·最稳·实测全过）' },
+  { v: 'https://speed.cloudflare.com/__down?bytes=100000000', t: 'Cloudflare 官方 · 100MB（高带宽·国内线路可能 403）' },
+  { v: 'https://speed.cloudflare.com/__down?bytes=200000000', t: 'Cloudflare 官方 · 200MB（高带宽·国内线路可能 403）' },
+  { v: 'https://speed.cloudflare.com/__down?bytes=10000000',  t: 'Cloudflare 官方 · 10MB（低带宽/路由器·测不准）' },
+  { v: 'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js', t: 'cdnjs（Cloudflare 备用·小文件/仅连通性）' },
   { v: 'https://d7uri8nf7uskq.cloudfront.net/tools/list-cloudfront-ips', t: 'AWS CloudFront 官方（供 CloudFront 优选）' },
 ];
 // 生成「预设下拉」HTML：选中即把值填入 targetId 输入框（保留手动自定义）。

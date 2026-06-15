@@ -131,9 +131,13 @@ func (s *Store) Load() error {
 	if freshInstall { // 全新安装默认开启自动发布，使测速完成即可经公开 API 取用
 		s.meta.Settings.AutoPublish = true
 	}
-	// 自动迁移：旧版默认测速地址 cf.xiu2.xyz/url 已失效(403/限速/小文件)，会让下载测速结果失真。
-	// 若用户的默认参数仍是这个坏地址，自动替换为 Cloudflare 官方测速端点（引擎新默认）。
-	if s.meta.Settings.DefaultConfig.URL == "https://cf.xiu2.xyz/url" {
+	// 自动迁移已失效/不稳的默认测速地址 → 引擎当前默认（Cloudflare 官方 50MB）：
+	//   ① cf.xiu2.xyz/url：旧 CFST 默认，限额 Worker，已 403/失真。
+	//   ② speed.cloudflare.com __down bytes=200000000(200MB)：曾短暂作默认，实测部分线路
+	//      (国内 IPv6→海外节点) ≥100MB 会被直接拒成 403，故一并迁到 50MB。
+	switch s.meta.Settings.DefaultConfig.URL {
+	case "https://cf.xiu2.xyz/url",
+		"https://speed.cloudflare.com/__down?bytes=200000000":
 		s.meta.Settings.DefaultConfig.URL = engine.DefaultURL
 	}
 	// 用引擎默认值补全测速默认参数，避免前端表单预填出现 0/空（Normalize 只填零值/非法值，不覆盖用户设定）。
