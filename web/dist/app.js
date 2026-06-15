@@ -217,7 +217,7 @@ function topbar(title, sub, actions = '') {
 // ============================================================
 // 页面：测速优选
 // ============================================================
-const ENGINE_DEFAULTS = { routines: 200, ping_times: 4, tcp_port: 443, httping: false, httping_status_code: 0, httping_cf_colo: '', test_count: 10, download_time: 10, url: 'https://cf.xiu2.xyz/url', min_speed: 0, disable: false, max_delay: 9999, min_delay: 0, max_loss_rate: 1, test_all: false };
+const ENGINE_DEFAULTS = { routines: 200, ping_times: 4, tcp_port: 443, httping: false, httping_status_code: 0, httping_cf_colo: '', test_count: 10, download_time: 10, url: 'https://speed.cloudflare.com/__down?bytes=200000000', min_speed: 0, disable: false, max_delay: 9999, min_delay: 0, max_loss_rate: 1, test_all: false };
 
 async function pageDashboard(main) {
   let profiles = [], sources = [], settings = {};
