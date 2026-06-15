@@ -10,7 +10,7 @@ const State = {
   theme: localStorage.getItem('cfst_theme') || 'light',
   page: location.hash.replace('#', '') || 'dashboard',
   version: 'dev',
-  live: { running: false, active: null, progress: null, queue: [], logs: [], lastFinish: null },
+  live: { running: false, active: null, progress: null, queue: [], logs: [], lastFinish: null, hijackHits: 0, hijackDismissed: false },
   sse: null,
 };
 
@@ -106,6 +106,39 @@ function appendLogLine() {
   log.scrollTop = log.scrollHeight;
 }
 
+// 透明代理劫持特征：下载/握手出现 TLS 证书不符等（Go 报错含 x509 / certificate is valid for /
+// failed to verify certificate，或 tls: internal error）。连接被中间人改道到代理节点时大量出现。
+const HIJACK_THRESHOLD = 3; // 单次测速内累计这么多次即判定为「疑似被劫持」
+function isProxyHijackError(msg) {
+  return /x509|certificate is valid for|failed to verify certificate|certificate subject name|tls: internal error|remote error: tls/i.test(msg || '');
+}
+
+// 重置本次测速的劫持检测状态（新测速开始时调用）。
+function resetHijackDetection() {
+  State.live.hijackHits = 0;
+  State.live.hijackDismissed = false;
+  renderHijackBanner();
+}
+
+// 在日志面板顶部渲染/清除「疑似被劫持」横幅。幂等：已显示则不重复渲染。
+function renderHijackBanner() {
+  const el = $('#log-hijack-banner');
+  if (!el) return;
+  const show = State.live.hijackHits >= HIJACK_THRESHOLD && !State.live.hijackDismissed;
+  if (!show) { el.innerHTML = ''; return; }
+  if (el.childElementCount) return; // 已显示，避免每条报错都重渲染
+  el.innerHTML = `<div class="hijack-banner">
+    <span class="ico">⚠️</span>
+    <div><b>测速连接疑似被透明代理劫持</b>　下载/握手大量出现 <b>TLS 证书不符</b>（拿到的证书并非 speed.cloudflare.com）。
+    本次测速结果<b>不可信</b>。请在<b>上游代理</b>为 Cloudflare 配置直连：把本机源 IP 加入代理「绕过/直连」名单，
+    或加规则 <code>DOMAIN-SUFFIX,cloudflare.com,DIRECT</code> 与 Cloudflare 网段
+    <code>IP-CIDR,104.16.0.0/13,DIRECT,no-resolve</code>（172.64.0.0/13、162.158.0.0/15 …）。</div>
+    <span class="x" title="忽略本次提示">×</span>
+  </div>`;
+  const x = $('.x', el);
+  if (x) x.onclick = () => { State.live.hijackDismissed = true; el.innerHTML = ''; };
+}
+
 function applyStatus(d) {
   State.live.running = !!d.running;
   State.live.active = d.active || null;
@@ -124,6 +157,7 @@ function onEvent(type, d) {
       break;
     case 'run.started':
       State.live.running = true; State.live.active = d; State.live.progress = null; State.live.lastFinish = null;
+      resetHijackDetection();
       pushLog(`测速开始 · ${d.trigger || ''} · profile=${d.profile || '-'}`);
       break;
     case 'run.progress':
@@ -147,7 +181,11 @@ function onEvent(type, d) {
       toast('测速已中止', 'warn');
       break;
     case 'log':
-      if (d.msg) { pushLog(d.msg, d.level, d.tone); appendLogLine(); }
+      if (d.msg) {
+        pushLog(d.msg, d.level, d.tone);
+        appendLogLine();
+        if (d.level === 'debug' && isProxyHijackError(d.msg)) { State.live.hijackHits++; renderHijackBanner(); }
+      }
       return; // 日志行已增量渲染，跳过整块重渲染（调试刷屏时显著降卡顿）
   }
   if (State.page === 'dashboard') updateLiveUI();
@@ -335,6 +373,7 @@ async function pageDashboard(main) {
         <div id="live-progress"></div>
         <div id="live-queue"></div>
         <div class="card-title" style="margin-top:18px">📜 运行日志</div>
+        <div id="log-hijack-banner"></div>
         <div class="logbox" id="live-log"></div>
       </div>
     </div>
@@ -379,6 +418,7 @@ async function startTest() {
   if (payload.ip_text !== undefined && !payload.ip_text) return toast('请输入要测速的 IP 段', 'warn');
   try {
     State.live.logs = [];
+    resetHijackDetection();
     const res = await api('POST', '/api/v1/speedtest/start', payload);
     if (res && res.ahead > 0) toast(`已加入队列，前面还有 ${res.ahead} 个任务`, 'info');
     else toast('测速已开始', 'ok');
@@ -434,6 +474,7 @@ function updateLiveUI() {
 
   const log = $('#live-log');
   if (log) { log.innerHTML = L.logs.map(logLineHTML).join(''); log.scrollTop = log.scrollHeight; }
+  renderHijackBanner();
 
   const card = $('#result-card');
   if (card && L.lastFinish && L.lastFinish.top && L.lastFinish.top.length) {
