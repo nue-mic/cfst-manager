@@ -1,0 +1,716 @@
+/* ============================================================
+ * CFST Manager — CDN 优选 IP 控制台（原生 SPA，无构建依赖）
+ * ============================================================ */
+(() => {
+'use strict';
+
+// ---------- 全局状态 ----------
+const State = {
+  token: localStorage.getItem('cfst_token') || '',
+  theme: localStorage.getItem('cfst_theme') || 'light',
+  page: location.hash.replace('#', '') || 'dashboard',
+  version: 'dev',
+  live: { running: false, active: null, progress: null, queue: [], logs: [], lastFinish: null },
+  sse: null,
+};
+
+// ---------- 工具 ----------
+const $ = (sel, root = document) => root.querySelector(sel);
+const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmtTime = (t) => { if (!t) return '-'; const d = new Date(t); return isNaN(d) ? '-' : d.toLocaleString('zh-CN', { hour12: false }); };
+const fmtNum = (n, d = 2) => (n == null ? '-' : Number(n).toFixed(d));
+
+function toast(msg, kind = 'info', ms = 3200) {
+  const host = $('#toast-host');
+  const t = document.createElement('div');
+  t.className = `toast ${kind}`;
+  t.textContent = msg;
+  host.appendChild(t);
+  setTimeout(() => { t.style.opacity = '0'; t.style.transition = 'opacity .3s'; setTimeout(() => t.remove(), 300); }, ms);
+}
+
+function copy(text) {
+  navigator.clipboard?.writeText(text).then(() => toast('已复制到剪贴板', 'ok')).catch(() => toast('复制失败', 'err'));
+}
+
+// ---------- API 客户端 ----------
+async function api(method, path, body) {
+  const opts = { method, headers: { 'Authorization': 'Bearer ' + State.token } };
+  if (body !== undefined) { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
+  const res = await fetch(path, opts);
+  if (res.status === 401) { logout(); throw new Error('未授权'); }
+  let json = {};
+  try { json = await res.json(); } catch (_) {}
+  if (!res.ok || json.ok === false) throw new Error(json.error || ('请求失败 ' + res.status));
+  return json.data;
+}
+
+// ---------- 鉴权 ----------
+function logout() {
+  State.token = '';
+  localStorage.removeItem('cfst_token');
+  if (State.sse) { State.sse.close(); State.sse = null; }
+  renderLogin();
+}
+
+async function tryLogin(token) {
+  const res = await fetch('/api/v1/version', { headers: { 'Authorization': 'Bearer ' + token } });
+  if (!res.ok) throw new Error('令牌无效');
+  const j = await res.json();
+  State.token = token;
+  localStorage.setItem('cfst_token', token);
+  State.version = j.data?.version || 'dev';
+  return true;
+}
+
+// ---------- SSE ----------
+function connectSSE() {
+  if (State.sse) State.sse.close();
+  const es = new EventSource('/api/v1/events?access_token=' + encodeURIComponent(State.token));
+  State.sse = es;
+  const handle = (type, e) => {
+    let data = {};
+    try { data = JSON.parse(e.data); } catch (_) { return; }
+    onEvent(type, data.data !== undefined ? data.data : data);
+  };
+  ['status', 'run.queued', 'run.started', 'run.progress', 'run.finished', 'run.failed', 'run.stopped', 'queue.changed', 'log'].forEach(t => {
+    es.addEventListener(t, (e) => handle(t, e));
+  });
+  es.onerror = () => { /* 浏览器自动重连 */ };
+}
+
+function pushLog(msg) {
+  State.live.logs.push({ ts: new Date().toLocaleTimeString('zh-CN', { hour12: false }), msg });
+  if (State.live.logs.length > 300) State.live.logs.shift();
+}
+
+function applyStatus(d) {
+  State.live.running = !!d.running;
+  State.live.active = d.active || null;
+  State.live.progress = d.progress || null;
+  State.live.queue = d.queue || [];
+}
+
+function onEvent(type, d) {
+  switch (type) {
+    case 'status':
+    case 'queue.changed':
+      applyStatus(d);
+      break;
+    case 'run.queued':
+      pushLog(`已入队 · ${d.trigger || ''}（前面还有 ${d.ahead} 个）`);
+      break;
+    case 'run.started':
+      State.live.running = true; State.live.active = d; State.live.progress = null; State.live.lastFinish = null;
+      pushLog(`测速开始 · ${d.trigger || ''} · profile=${d.profile || '-'}`);
+      break;
+    case 'run.progress':
+      State.live.progress = d;
+      break;
+    case 'run.finished':
+      State.live.running = false; State.live.lastFinish = d;
+      pushLog(`测速完成 · 命中 ${d.count} 个 IP`);
+      toast(`测速完成，命中 ${d.count} 个 IP`, 'ok');
+      if (State.page === 'history' || State.page === 'schedules') renderPage();
+      break;
+    case 'run.failed':
+      State.live.running = false; State.live.lastFinish = d;
+      pushLog(`测速失败 · ${d.error || ''}`);
+      toast('测速失败: ' + (d.error || ''), 'err', 5000);
+      if (State.page === 'schedules') renderPage();
+      break;
+    case 'run.stopped':
+      State.live.running = false; State.live.lastFinish = d;
+      pushLog('测速已中止');
+      toast('测速已中止', 'warn');
+      break;
+    case 'log':
+      if (d.msg) pushLog(d.msg);
+      break;
+  }
+  if (State.page === 'dashboard') updateLiveUI();
+}
+
+// ============================================================
+// 渲染
+// ============================================================
+const NAV = [
+  { id: 'dashboard', ico: '⚡', label: '测速优选' },
+  { id: 'schedules', ico: '⏰', label: '定时任务' },
+  { id: 'history', ico: '🕑', label: '历史记录' },
+  { id: 'profiles', ico: '🌐', label: 'CDN Profile' },
+  { id: 'licenses', ico: '🔑', label: '授权密钥' },
+  { id: 'ipsources', ico: '📄', label: 'IP 源' },
+  { id: 'settings', ico: '⚙️', label: '设置' },
+  { id: 'apidocs', ico: '📡', label: 'API 文档' },
+];
+
+function renderLogin() {
+  document.documentElement.setAttribute('data-theme', State.theme);
+  $('#app').innerHTML = `
+    <div class="login-wrap"><div class="card login-card">
+      <div class="logo-big">⚡</div>
+      <h2>CFST Manager</h2>
+      <p>CDN 优选 IP 测速控制台 · 请输入管理令牌登录</p>
+      <div class="field">
+        <label>管理令牌 (CFST_API_TOKEN)</label>
+        <input type="password" id="login-token" placeholder="粘贴管理令牌…" autofocus>
+        <div class="desc">首次启动若未设置 CFST_API_TOKEN，令牌会在服务端日志中自动生成并打印。</div>
+      </div>
+      <button class="btn btn-primary" id="login-btn" style="width:100%">登 录</button>
+    </div></div>`;
+  const submit = async () => {
+    const tk = $('#login-token').value.trim();
+    if (!tk) return toast('请输入令牌', 'warn');
+    try { await tryLogin(tk); boot(); } catch (e) { toast('登录失败：' + e.message, 'err'); }
+  };
+  $('#login-btn').onclick = submit;
+  $('#login-token').onkeydown = (e) => { if (e.key === 'Enter') submit(); };
+}
+
+function renderShell() {
+  document.documentElement.setAttribute('data-theme', State.theme);
+  $('#app').innerHTML = `
+    <div class="layout">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="logo">⚡</div>
+          <div><div class="name">CFST Manager</div><div class="ver">${esc(State.version)}</div></div>
+        </div>
+        ${NAV.map(n => `<div class="nav-item" data-nav="${n.id}"><span class="ico">${n.ico}</span>${n.label}</div>`).join('')}
+        <div class="spacer"></div>
+        <div class="nav-item" id="theme-toggle"><span class="ico">🌓</span>切换主题</div>
+        <div class="nav-item" id="logout-btn"><span class="ico">🚪</span>退出登录</div>
+        <div class="side-foot">基于 XIU2/CloudflareSpeedTest · GPL-3.0</div>
+      </aside>
+      <main class="main" id="main"></main>
+    </div>`;
+  $$('[data-nav]').forEach(el => el.onclick = () => go(el.dataset.nav));
+  $('#theme-toggle').onclick = () => {
+    State.theme = State.theme === 'dark' ? 'light' : 'dark';
+    localStorage.setItem('cfst_theme', State.theme);
+    document.documentElement.setAttribute('data-theme', State.theme);
+  };
+  $('#logout-btn').onclick = logout;
+  renderPage();
+}
+
+function go(page) { State.page = page; location.hash = page; renderPage(); }
+
+function setActiveNav() { $$('[data-nav]').forEach(el => el.classList.toggle('active', el.dataset.nav === State.page)); }
+
+async function renderPage() {
+  setActiveNav();
+  const main = $('#main');
+  if (!main) return;
+  const pages = { dashboard: pageDashboard, schedules: pageSchedules, history: pageHistory, profiles: pageProfiles, licenses: pageLicenses, ipsources: pageIPSources, settings: pageSettings, apidocs: pageApiDocs };
+  const fn = pages[State.page] || pageDashboard;
+  main.innerHTML = `<div class="empty"><div class="big">⏳</div>加载中…</div>`;
+  try { await fn(main); } catch (e) { main.innerHTML = `<div class="empty"><div class="big">⚠️</div>${esc(e.message)}</div>`; }
+}
+
+function topbar(title, sub, actions = '') {
+  return `<div class="topbar"><div><h1>${title}</h1>${sub ? `<div class="sub">${sub}</div>` : ''}</div><div class="topbar-actions">${actions}</div></div>`;
+}
+
+// ============================================================
+// 页面：测速优选
+// ============================================================
+const ENGINE_DEFAULTS = { routines: 200, ping_times: 4, tcp_port: 443, httping: false, httping_status_code: 0, httping_cf_colo: '', test_count: 10, download_time: 10, url: 'https://cf.xiu2.xyz/url', min_speed: 0, disable: false, max_delay: 9999, min_delay: 0, max_loss_rate: 1, test_all: false };
+
+async function pageDashboard(main) {
+  let profiles = [], sources = [], settings = {};
+  try { [profiles, sources, settings] = await Promise.all([api('GET', '/api/v1/profiles'), api('GET', '/api/v1/ipsources'), api('GET', '/api/v1/settings')]); } catch (_) {}
+  const def = Object.assign({}, ENGINE_DEFAULTS, settings.default_config || {});
+
+  main.innerHTML = topbar('测速优选', '配置参数并开始优选 — 所有命令行参数均可在此图形化设置') + `
+    <div class="grid grid-2">
+      <div class="card">
+        <div class="card-title">📋 测速配置</div>
+        <div class="field">
+          <label>目标 CDN Profile</label>
+          <select id="f-profile">${profiles.map(p => `<option value="${esc(p.name)}">${esc(p.title || p.name)}</option>`).join('')}</select>
+        </div>
+        <div class="field">
+          <label>IP 来源</label>
+          <div class="row" style="margin-bottom:8px">
+            <label class="radio"><input type="radio" name="ipmode" value="file" checked>选择 IP 源文件</label>
+            <label class="radio"><input type="radio" name="ipmode" value="text">手动输入 IP 段</label>
+          </div>
+          <select id="f-ipsource">${sources.map(s => `<option value="${esc(s.name)}">${esc(s.name)} (${s.lines} 段${s.builtin ? ' · 内置' : ''})</option>`).join('')}</select>
+          <textarea id="f-iptext" placeholder="例如：1.1.1.1, 104.16.0.0/24, 2606:4700::/32" style="display:none"></textarea>
+        </div>
+        <div class="row">
+          <div class="field"><label>测速模式</label>
+            <select id="f-httping"><option value="false">TCPing（默认）</option><option value="true">HTTPing</option></select>
+          </div>
+          <div class="field"><label>测速端口 -tp</label><input type="number" id="f-tcp_port" value="${def.tcp_port}"></div>
+        </div>
+        <details>
+          <summary style="cursor:pointer;color:var(--text-2);margin:6px 0 12px">⚙️ 高级参数</summary>
+          <div class="row">
+            <div class="field"><label>延迟测速线程 -n</label><input type="number" id="f-routines" value="${def.routines}"></div>
+            <div class="field"><label>延迟测速次数 -t</label><input type="number" id="f-ping_times" value="${def.ping_times}"></div>
+          </div>
+          <div class="row">
+            <div class="field"><label>下载测速数量 -dn</label><input type="number" id="f-test_count" value="${def.test_count}"></div>
+            <div class="field"><label>下载测速时间(秒) -dt</label><input type="number" id="f-download_time" value="${def.download_time}"></div>
+          </div>
+          <div class="field"><label>测速地址 -url</label><input type="text" id="f-url" value="${esc(def.url)}"></div>
+          <div class="row">
+            <div class="field"><label>下载速度下限(MB/s) -sl</label><input type="number" step="0.1" id="f-min_speed" value="${def.min_speed}"></div>
+            <div class="field"><label>丢包率上限 -tlr</label><input type="number" step="0.01" id="f-max_loss_rate" value="${def.max_loss_rate}"></div>
+          </div>
+          <div class="row">
+            <div class="field"><label>平均延迟上限(ms) -tl</label><input type="number" id="f-max_delay" value="${def.max_delay}"></div>
+            <div class="field"><label>平均延迟下限(ms) -tll</label><input type="number" id="f-min_delay" value="${def.min_delay}"></div>
+          </div>
+          <div class="row">
+            <div class="field"><label>HTTPing 有效状态码</label><input type="number" id="f-httping_status_code" value="${def.httping_status_code}"></div>
+            <div class="field"><label>匹配地区 -cfcolo</label><input type="text" id="f-httping_cf_colo" placeholder="HKG,LAX,SJC" value="${esc(def.httping_cf_colo)}"></div>
+          </div>
+          <div class="row">
+            <label class="switch"><input type="checkbox" id="f-disable" ${def.disable ? 'checked' : ''}><span class="track"></span>禁用下载测速 -dd</label>
+            <label class="switch"><input type="checkbox" id="f-test_all" ${def.test_all ? 'checked' : ''}><span class="track"></span>测速全部 IP -allip</label>
+          </div>
+        </details>
+        <div class="field"><label>备注（可选）</label><input type="text" id="f-note" placeholder="给这次测速加个标签…"></div>
+        <div class="flex">
+          <button class="btn btn-primary" id="btn-start">▶ 开始测速</button>
+          <button class="btn btn-danger" id="btn-stop">■ 停止</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">📡 实时状态 <span id="live-badge"></span></div>
+        <div id="live-progress"></div>
+        <div id="live-queue"></div>
+        <div class="card-title" style="margin-top:18px">📜 运行日志</div>
+        <div class="logbox" id="live-log"></div>
+      </div>
+    </div>
+
+    <div class="card" id="result-card" style="display:none">
+      <div class="card-title">🏆 最新优选结果 <span class="hint" id="result-hint"></span></div>
+      <div class="table-wrap"><table id="result-table"></table></div>
+    </div>`;
+
+  // IP 来源切换
+  $$('input[name=ipmode]').forEach(r => r.onchange = () => {
+    const file = $('input[name=ipmode]:checked').value === 'file';
+    $('#f-ipsource').style.display = file ? '' : 'none';
+    $('#f-iptext').style.display = file ? 'none' : '';
+  });
+
+  $('#btn-start').onclick = startTest;
+  $('#btn-stop').onclick = async () => { try { await api('POST', '/api/v1/speedtest/stop'); } catch (e) { toast(e.message, 'warn'); } };
+  updateLiveUI();
+}
+
+function collectConfig() {
+  const v = (id) => $('#' + id)?.value;
+  const num = (id) => Number(v(id));
+  const cfg = {
+    routines: num('f-routines'), ping_times: num('f-ping_times'), tcp_port: num('f-tcp_port'),
+    httping: v('f-httping') === 'true', httping_status_code: num('f-httping_status_code'),
+    httping_cf_colo: v('f-httping_cf_colo') || '',
+    test_count: num('f-test_count'), download_time: num('f-download_time'), url: v('f-url') || '',
+    min_speed: num('f-min_speed'), disable: $('#f-disable').checked,
+    max_delay: num('f-max_delay'), min_delay: num('f-min_delay'), max_loss_rate: num('f-max_loss_rate'),
+    test_all: $('#f-test_all').checked,
+  };
+  const payload = Object.assign({}, cfg, { profile: v('f-profile'), note: v('f-note') || '' });
+  if ($('input[name=ipmode]:checked').value === 'text') payload.ip_text = $('#f-iptext').value.trim();
+  else payload.ip_source = $('#f-ipsource').value;
+  return payload;
+}
+
+async function startTest() {
+  const payload = collectConfig();
+  if (payload.ip_text !== undefined && !payload.ip_text) return toast('请输入要测速的 IP 段', 'warn');
+  try {
+    State.live.logs = [];
+    const res = await api('POST', '/api/v1/speedtest/start', payload);
+    if (res && res.ahead > 0) toast(`已加入队列，前面还有 ${res.ahead} 个任务`, 'info');
+    else toast('测速已开始', 'ok');
+  } catch (e) { toast('启动失败：' + e.message, 'err'); }
+}
+
+function updateLiveUI() {
+  const badge = $('#live-badge'); if (!badge) return;
+  const L = State.live;
+  const qn = (L.queue || []).length;
+  badge.innerHTML = L.running
+    ? `<span class="badge ok"><span class="pulse"></span> 测速中</span>${qn ? ` <span class="badge muted">队列 ${qn}</span>` : ''}`
+    : (qn ? `<span class="badge warn">队列 ${qn}</span>` : `<span class="badge muted">空闲</span>`);
+  const start = $('#btn-start'), stop = $('#btn-stop');
+  if (start) { start.disabled = false; start.textContent = L.running ? '▶ 加入队列' : '▶ 开始测速'; }
+  if (stop) stop.disabled = !L.running;
+
+  const prog = $('#live-progress');
+  if (prog) {
+    if (L.progress && (L.running || L.progress.total)) {
+      const p = L.progress;
+      const pct = p.total ? Math.min(100, Math.round(p.current / p.total * 100)) : 0;
+      const stage = p.stage === 'download' ? '下载测速' : '延迟测速';
+      const who = L.active && L.active.trigger ? ` <span class="tag">${esc(L.active.trigger)}</span>` : '';
+      prog.innerHTML = `
+        <div class="flex" style="margin-bottom:6px;font-size:12px;color:var(--text-2)">当前任务${who}</div>
+        <div class="progress"><i style="width:${pct}%"></i></div>
+        <div class="prog-meta"><span>${stage} · ${pct}%</span><span>${p.current}/${p.total} · 可用 ${p.available}</span></div>`;
+    } else if (L.active && L.running) {
+      prog.innerHTML = `<div class="muted">准备中…（加载 IP 段）</div>`;
+    } else {
+      prog.innerHTML = `<div class="muted">暂无进行中的任务。配置参数后点击「开始测速」。</div>`;
+    }
+  }
+
+  const queue = $('#live-queue');
+  if (queue) {
+    if (qn > 0) {
+      queue.innerHTML = `<div style="margin-top:12px"><div style="font-size:12px;color:var(--text-2);margin-bottom:6px">⏳ 排队中（${qn}）</div>` +
+        L.queue.map((j, i) => `<div class="flex" style="padding:5px 0;border-bottom:1px solid var(--border);font-size:12.5px">
+          <span class="rank">${i + 1}</span>
+          <span>${esc(j.trigger || '手动')}</span>
+          <span class="muted">${esc(j.profile || '')}</span>
+          <button class="btn btn-sm btn-ghost right" data-cancelq="${esc(j.run_id)}">取消</button>
+        </div>`).join('') + `</div>`;
+      $$('[data-cancelq]', queue).forEach(b => b.onclick = async () => {
+        try { await api('DELETE', '/api/v1/speedtest/queue/' + encodeURIComponent(b.dataset.cancelq)); } catch (e) { toast(e.message, 'warn'); }
+      });
+    } else {
+      queue.innerHTML = '';
+    }
+  }
+
+  const log = $('#live-log');
+  if (log) { log.innerHTML = L.logs.map(l => `<div class="line"><span class="ts">${l.ts}</span>${esc(l.msg)}</div>`).join(''); log.scrollTop = log.scrollHeight; }
+
+  const card = $('#result-card');
+  if (card && L.lastFinish && L.lastFinish.top && L.lastFinish.top.length) {
+    card.style.display = '';
+    $('#result-hint').textContent = `共 ${L.lastFinish.count} 个 · 展示前 ${L.lastFinish.top.length}`;
+    $('#result-table').innerHTML = resultTableHTML(L.lastFinish.top);
+  }
+}
+
+function resultTableHTML(rows) {
+  return `<thead><tr><th>#</th><th>IP 地址</th><th>丢包率</th><th>平均延迟</th><th>下载速度</th><th>地区</th></tr></thead><tbody>${
+    rows.map((r, i) => `<tr>
+      <td class="rank ${i === 0 ? 'top' : ''}">${i + 1}</td>
+      <td class="mono">${esc(r.ip)}</td>
+      <td>${fmtNum(r.loss_rate * 100, 0)}%</td>
+      <td>${fmtNum(r.delay_ms, 1)} ms</td>
+      <td>${fmtNum(r.speed_mbps)} MB/s</td>
+      <td>${esc(r.colo || '-')}</td></tr>`).join('')}</tbody>`;
+}
+
+// ============================================================
+// 页面：历史记录
+// ============================================================
+async function pageHistory(main) {
+  const runs = await api('GET', '/api/v1/runs');
+  main.innerHTML = topbar('历史记录', `共 ${runs.length} 条测速记录`) + `
+    <div class="card mb0">${runs.length === 0 ? emptyHTML('暂无历史记录', '去「测速优选」开始第一次优选') : `
+      <div class="table-wrap"><table>
+        <thead><tr><th>时间</th><th>Profile</th><th>版本</th><th>状态</th><th>命中</th><th>最优 IP</th><th>最优速度</th><th>操作</th></tr></thead>
+        <tbody>${runs.map(rowRun).join('')}</tbody>
+      </table></div>`}</div>`;
+  $$('[data-act]').forEach(b => b.onclick = () => runAction(b.dataset.act, b.dataset.id));
+}
+
+function statusBadge(s) {
+  const m = { finished: ['ok', '完成'], failed: ['err', '失败'], stopped: ['warn', '中止'] };
+  const [k, t] = m[s] || ['muted', s];
+  return `<span class="badge ${k}">${t}</span>`;
+}
+
+function rowRun(r) {
+  return `<tr>
+    <td>${fmtTime(r.created_at)}${r.note ? `<br><span class="tag">${esc(r.note)}</span>` : ''}</td>
+    <td>${esc(r.profile || '-')}</td>
+    <td>${esc(r.ip_version || '-')}</td>
+    <td>${statusBadge(r.status)}</td>
+    <td>${r.count}</td>
+    <td class="mono">${esc(r.best_ip || '-')}</td>
+    <td>${r.best_mbps ? fmtNum(r.best_mbps) + ' MB/s' : '-'}</td>
+    <td><div class="flex">
+      <button class="btn btn-sm" data-act="view" data-id="${r.id}">查看</button>
+      <button class="btn btn-sm" data-act="publish" data-id="${r.id}">发布</button>
+      <button class="btn btn-sm" data-act="export" data-id="${r.id}">导出</button>
+      <button class="btn btn-sm btn-danger" data-act="del" data-id="${r.id}">删除</button>
+    </div></td></tr>`;
+}
+
+async function runAction(act, id) {
+  if (act === 'del') {
+    if (!confirm('确定删除该测速记录？')) return;
+    try { await api('DELETE', '/api/v1/runs/' + id); toast('已删除', 'ok'); renderPage(); } catch (e) { toast(e.message, 'err'); }
+  } else if (act === 'view') {
+    try { const run = await api('GET', '/api/v1/runs/' + id); showRunModal(run); } catch (e) { toast(e.message, 'err'); }
+  } else if (act === 'export') {
+    showExportModal(id);
+  } else if (act === 'publish') {
+    showPublishModal(id);
+  }
+}
+
+function showRunModal(run) {
+  const rows = run.results || [];
+  modal(`测速详情 · ${esc(run.id)}`, `
+    <div class="grid grid-4" style="margin-bottom:16px">
+      <div class="kpi"><span class="v">${rows.length}</span><span class="l">命中 IP 数</span></div>
+      <div class="kpi"><span class="v">${esc(run.ip_version || '-')}</span><span class="l">IP 版本</span></div>
+      <div class="kpi"><span class="v">${esc(run.profile || '-')}</span><span class="l">Profile</span></div>
+      <div class="kpi"><span class="v">${statusBadge(run.status)}</span><span class="l">状态</span></div>
+    </div>
+    ${run.error ? `<div class="badge err" style="margin-bottom:12px">错误：${esc(run.error)}</div>` : ''}
+    <div class="table-wrap" style="max-height:50vh;overflow:auto"><table>${resultTableHTML(rows.slice(0, 200))}</table></div>
+    ${rows.length > 200 ? `<div class="muted" style="margin-top:8px">仅展示前 200 条，完整结果请导出。</div>` : ''}`);
+}
+
+function showExportModal(id) {
+  const base = `/api/v1/runs/${id}/export`;
+  const tk = encodeURIComponent(State.token);
+  modal('导出结果', `
+    <p class="muted">选择导出格式（含管理令牌的下载链接）：</p>
+    <div class="flex" style="flex-wrap:wrap">
+      <a class="btn" href="${base}?format=csv&access_token=${tk}" target="_blank">⬇ CSV（同 CFST result.csv）</a>
+      <a class="btn" href="${base}?format=txt&access_token=${tk}" target="_blank">⬇ TXT（纯 IP 列表）</a>
+      <a class="btn" href="${base}?format=json&access_token=${tk}" target="_blank">⬇ JSON</a>
+    </div>`);
+}
+
+async function showPublishModal(id) {
+  const profiles = await api('GET', '/api/v1/profiles');
+  modal('发布到 Profile', `
+    <p class="muted">把该测速结果发布为对外 API 的优选数据源（按 IP 版本写入对应槽位）。</p>
+    <div class="field"><label>目标 Profile</label><select id="pub-profile">${profiles.map(p => `<option value="${esc(p.name)}">${esc(p.title || p.name)}</option>`).join('')}</select></div>
+    <div class="field"><label>IP 版本</label><select id="pub-ver"><option value="">自动（按记录检测）</option><option value="v4">v4</option><option value="v6">v6</option><option value="mixed">v4+v6</option></select></div>
+    <button class="btn btn-primary" id="pub-go">确认发布</button>`);
+  $('#pub-go').onclick = async () => {
+    try {
+      await api('POST', `/api/v1/runs/${id}/publish`, { profile: $('#pub-profile').value, ip_version: $('#pub-ver').value });
+      toast('已发布', 'ok'); closeModal();
+    } catch (e) { toast(e.message, 'err'); }
+  };
+}
+
+// ============================================================
+// 页面：CDN Profile
+// ============================================================
+async function pageProfiles(main) {
+  const [profiles, runs] = await Promise.all([api('GET', '/api/v1/profiles'), api('GET', '/api/v1/runs')]);
+  main.innerHTML = topbar('CDN Profile', '每个 Profile 对应一个对外 API 端点（get_&lt;name&gt;_ip），可指定其发布的优选数据') + `
+    <div class="card mb0"><div class="table-wrap"><table>
+      <thead><tr><th>名称</th><th>标题</th><th>已发布 v4</th><th>已发布 v6</th><th>对外端点</th><th>操作</th></tr></thead>
+      <tbody>${profiles.map(p => `<tr>
+        <td><span class="tag">${esc(p.name)}</span></td>
+        <td>${esc(p.title || '-')}</td>
+        <td class="mono">${esc(p.published_v4_run_id || '—')}</td>
+        <td class="mono">${esc(p.published_v6_run_id || '—')}</td>
+        <td class="mono">/api/cf2dns/get_${esc(p.name)}_ip</td>
+        <td><button class="btn btn-sm" data-edit="${esc(p.name)}">编辑</button></td></tr>`).join('')}</tbody>
+    </table></div></div>`;
+  $$('[data-edit]').forEach(b => b.onclick = () => editProfile(b.dataset.edit, profiles, runs));
+}
+
+function editProfile(name, profiles, runs) {
+  const p = profiles.find(x => x.name === name) || { name };
+  const opt = (sel) => `<option value="">— 不发布 —</option>` + runs.map(r => `<option value="${r.id}" ${sel === r.id ? 'selected' : ''}>${fmtTime(r.created_at)} · ${r.ip_version} · ${r.count}IP · ${esc(r.best_ip || '')}</option>`).join('');
+  modal(`编辑 Profile · ${esc(name)}`, `
+    <div class="field"><label>标题</label><input type="text" id="pf-title" value="${esc(p.title || '')}"></div>
+    <div class="row">
+      <div class="field"><label>发布的 v4 记录</label><select id="pf-v4">${opt(p.published_v4_run_id)}</select></div>
+      <div class="field"><label>发布的 v6 记录</label><select id="pf-v6">${opt(p.published_v6_run_id)}</select></div>
+    </div>
+    <div class="desc muted" style="margin-bottom:14px">提示：三网线路（CM/CU/CT）默认统一使用上面发布的记录。单一探测点无法分别测量三网延迟，如有多探测点数据可在 API 中按线路绑定不同记录（高级用法）。</div>
+    <button class="btn btn-primary" id="pf-save">保存</button>`);
+  $('#pf-save').onclick = async () => {
+    try {
+      await api('PUT', '/api/v1/profiles/' + name, {
+        name, title: $('#pf-title').value,
+        published_v4_run_id: $('#pf-v4').value, published_v6_run_id: $('#pf-v6').value,
+      });
+      toast('已保存', 'ok'); closeModal(); renderPage();
+    } catch (e) { toast(e.message, 'err'); }
+  };
+}
+
+// ============================================================
+// 页面：授权密钥
+// ============================================================
+async function pageLicenses(main) {
+  const lics = await api('GET', '/api/v1/licenses');
+  main.innerHTML = topbar('授权密钥', '对外 API 的访问密钥（客户端通过 ?key= 调用）。开放模式下任意 key 均可访问。',
+    `<button class="btn btn-primary" id="add-lic">+ 新建密钥</button>`) + `
+    <div class="card mb0">${lics.length === 0 ? emptyHTML('暂无密钥', '点击右上角新建，或在「设置」中开启公开模式') : `
+      <div class="table-wrap"><table>
+        <thead><tr><th>密钥</th><th>备注</th><th>状态</th><th>余额</th><th>创建时间</th><th>操作</th></tr></thead>
+        <tbody>${lics.map(l => `<tr>
+          <td class="mono">${esc(l.key)} <button class="btn btn-sm btn-ghost" data-copy="${esc(l.key)}">复制</button></td>
+          <td>${esc(l.note || '-')}</td>
+          <td>${l.enabled ? '<span class="badge ok">启用</span>' : '<span class="badge muted">停用</span>'}</td>
+          <td>${l.count}</td>
+          <td>${fmtTime(l.created_at)}</td>
+          <td><div class="flex">
+            <button class="btn btn-sm" data-toggle="${esc(l.key)}" data-en="${l.enabled}">${l.enabled ? '停用' : '启用'}</button>
+            <button class="btn btn-sm btn-danger" data-del="${esc(l.key)}">删除</button>
+          </div></td></tr>`).join('')}</tbody>
+      </table></div>`}</div>`;
+  $('#add-lic').onclick = addLicense;
+  $$('[data-copy]').forEach(b => b.onclick = () => copy(b.dataset.copy));
+  $$('[data-del]').forEach(b => b.onclick = async () => { if (confirm('删除该密钥？')) { try { await api('DELETE', '/api/v1/licenses/' + encodeURIComponent(b.dataset.del)); toast('已删除', 'ok'); renderPage(); } catch (e) { toast(e.message, 'err'); } } });
+  $$('[data-toggle]').forEach(b => b.onclick = async () => {
+    try { await api('PUT', '/api/v1/licenses/' + encodeURIComponent(b.dataset.toggle), { note: '', enabled: b.dataset.en !== 'true', count: 0 }); renderPage(); } catch (e) { toast(e.message, 'err'); }
+  });
+}
+
+function addLicense() {
+  modal('新建授权密钥', `
+    <div class="field"><label>密钥（留空自动生成）</label><input type="text" id="lic-key" placeholder="留空将自动生成"></div>
+    <div class="field"><label>备注</label><input type="text" id="lic-note" placeholder="例如：给某客户端"></div>
+    <div class="field"><label>余额 count（默认 99999999）</label><input type="number" id="lic-count" placeholder="99999999"></div>
+    <button class="btn btn-primary" id="lic-go">创建</button>`);
+  $('#lic-go').onclick = async () => {
+    try {
+      const c = Number($('#lic-count').value) || 0;
+      const lic = await api('POST', '/api/v1/licenses', { key: $('#lic-key').value.trim(), note: $('#lic-note').value, count: c });
+      toast('已创建：' + lic.key, 'ok'); closeModal(); renderPage();
+    } catch (e) { toast(e.message, 'err'); }
+  };
+}
+
+// ============================================================
+// 页面：IP 源
+// ============================================================
+async function pageIPSources(main) {
+  const list = await api('GET', '/api/v1/ipsources');
+  main.innerHTML = topbar('IP 源管理', '待测速的 IP 段数据文件。内置 ip.txt / ipv6.txt 来自 Cloudflare 官方 IP 段。',
+    `<button class="btn btn-primary" id="add-src">+ 新建 IP 源</button>`) + `
+    <div class="card mb0"><div class="table-wrap"><table>
+      <thead><tr><th>文件名</th><th>IP 段数</th><th>大小</th><th>类型</th><th>操作</th></tr></thead>
+      <tbody>${list.map(s => `<tr>
+        <td class="mono">${esc(s.name)}</td><td>${s.lines}</td><td>${(s.size / 1024).toFixed(1)} KB</td>
+        <td>${s.builtin ? '<span class="badge info">内置</span>' : '<span class="badge muted">自定义</span>'}</td>
+        <td><div class="flex">
+          <button class="btn btn-sm" data-edit="${esc(s.name)}">编辑</button>
+          ${s.builtin ? '' : `<button class="btn btn-sm btn-danger" data-del="${esc(s.name)}">删除</button>`}
+        </div></td></tr>`).join('')}</tbody>
+    </table></div></div>`;
+  $('#add-src').onclick = () => editSource('', '');
+  $$('[data-edit]').forEach(b => b.onclick = async () => { const d = await api('GET', '/api/v1/ipsources/' + encodeURIComponent(b.dataset.edit)); editSource(d.name, d.content); });
+  $$('[data-del]').forEach(b => b.onclick = async () => { if (confirm('删除该 IP 源？')) { try { await api('DELETE', '/api/v1/ipsources/' + encodeURIComponent(b.dataset.del)); toast('已删除', 'ok'); renderPage(); } catch (e) { toast(e.message, 'err'); } } });
+}
+
+function editSource(name, content) {
+  modal(name ? `编辑 IP 源 · ${esc(name)}` : '新建 IP 源', `
+    <div class="field"><label>文件名</label><input type="text" id="src-name" value="${esc(name)}" ${name ? 'readonly' : ''} placeholder="例如：my-ip.txt"></div>
+    <div class="field"><label>内容（每行一个 IP 或 IP 段）</label><textarea id="src-content" style="min-height:300px">${esc(content)}</textarea></div>
+    <button class="btn btn-primary" id="src-save">保存</button>`);
+  $('#src-save').onclick = async () => {
+    const n = $('#src-name').value.trim();
+    if (!n) return toast('请输入文件名', 'warn');
+    try { await api('PUT', '/api/v1/ipsources/' + encodeURIComponent(n), { content: $('#src-content').value }); toast('已保存', 'ok'); closeModal(); renderPage(); } catch (e) { toast(e.message, 'err'); }
+  };
+}
+
+// ============================================================
+// 页面：设置
+// ============================================================
+async function pageSettings(main) {
+  const s = await api('GET', '/api/v1/settings');
+  main.innerHTML = topbar('设置', '对外 API 与测速默认行为') + `
+    <div class="card">
+      <div class="card-title">📡 对外 API</div>
+      <div class="field"><label class="switch"><input type="checkbox" id="s-open" ${s.public_open ? 'checked' : ''}><span class="track"></span> 公开模式（接受任意 key，便于无缝迁移）</label>
+        <div class="desc">开启后，任何携带 key 的请求都可访问对外优选 IP API，无需预先在「授权密钥」中登记。</div></div>
+      <div class="field"><label class="switch"><input type="checkbox" id="s-auto" ${s.auto_publish ? 'checked' : ''}><span class="track"></span> 自动发布（测速完成即更新对应 Profile）</label></div>
+      <div class="field"><label>对外 API 单次返回 IP 数上限</label><input type="number" id="s-max" value="${s.public_result_max || 10}" style="max-width:200px"></div>
+      <button class="btn btn-primary" id="s-save">保存设置</button>
+    </div>`;
+  $('#s-save').onclick = async () => {
+    try {
+      await api('PUT', '/api/v1/settings', {
+        public_open: $('#s-open').checked, auto_publish: $('#s-auto').checked,
+        public_result_max: Number($('#s-max').value) || 10, default_config: s.default_config || {},
+      });
+      toast('设置已保存', 'ok');
+    } catch (e) { toast(e.message, 'err'); }
+  };
+}
+
+// ============================================================
+// 页面：API 文档
+// ============================================================
+async function pageApiDocs(main) {
+  const origin = location.origin;
+  const block = (title, code) => `<div class="card"><div class="card-title">${title}</div><div class="code-block">${esc(code)}<button class="btn btn-sm copy-btn" data-copy="${esc(code)}">复制</button></div></div>`;
+  main.innerHTML = topbar('对外 API 文档', '本服务的对外接口与 wetest.vip / hostmonit 逐字段兼容，现有客户端可零改动迁移') + `
+    <div class="card">
+      <div class="card-title">🔗 无缝迁移说明</div>
+      <p class="muted mb0">把原本指向 <code>www.wetest.vip</code> 或 <code>api.hostmonit.com</code> 的请求改指向本服务地址 <code>${esc(origin)}</code> 即可。响应结构（<code>status/code/msg/info</code> 与三网 <code>CM/CU/CT</code> 分类）完全一致。要让旧客户端的已有 key 直接可用，请在「设置」中开启<b>公开模式</b>，或在「授权密钥」中登记其 key。</p>
+    </div>
+    ${block('获取 CloudFlare 优选 IP（GET）', `curl "${origin}/api/cf2dns/get_cloudflare_ip?key=YOUR_KEY&type=v4"`)}
+    ${block('获取优选 IP（hostmonit 兼容 · JSON POST）', `curl -X POST "${origin}/get_optimization_ip" \\\n  -H "Content-Type: application/json" \\\n  -d '{"key":"YOUR_KEY","type":"v4"}'`)}
+    ${block('获取 License 授权信息', `curl "${origin}/api/cf2dns/get_cloudflare_license?license=YOUR_KEY"`)}
+    <div class="card">
+      <div class="card-title">📦 成功响应示例（优选 IP）</div>
+      <div class="code-block">${esc(JSON.stringify({ status: true, code: 200, msg: '请求成功', info: { CM: [{ ip: '104.16.x.x', colo: 'SJC', latency: 150.5 }], CU: [], CT: [] } }, null, 2))}</div>
+    </div>
+    <div class="card mb0">
+      <div class="card-title">📑 可用端点</div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>端点</th><th>方法</th><th>参数</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">/api/cf2dns/get_cloudflare_ip</td><td>GET/POST</td><td>key, type</td><td>Cloudflare 优选 IP</td></tr>
+          <tr><td class="mono">/api/cf2dns/get_cloudfront_ip</td><td>GET/POST</td><td>key, type</td><td>CloudFront 优选 IP</td></tr>
+          <tr><td class="mono">/api/cf2dns/get_edgeone_ip</td><td>GET/POST</td><td>key, type</td><td>EdgeOne 优选 IP</td></tr>
+          <tr><td class="mono">/api/cf2dns/get_cloudflare_license</td><td>GET/POST</td><td>license</td><td>授权信息</td></tr>
+          <tr><td class="mono">/get_optimization_ip</td><td>POST</td><td>key, type (JSON)</td><td>hostmonit 兼容</td></tr>
+        </tbody>
+      </table></div>
+    </div>`;
+  $$('[data-copy]').forEach(b => b.onclick = () => copy(b.dataset.copy));
+}
+
+// ============================================================
+// 通用组件
+// ============================================================
+function emptyHTML(title, sub) { return `<div class="empty"><div class="big">📭</div><div>${esc(title)}</div><div class="muted" style="margin-top:6px">${esc(sub || '')}</div></div>`; }
+
+function modal(title, bodyHTML) {
+  closeModal();
+  const mask = document.createElement('div');
+  mask.className = 'modal-mask'; mask.id = 'modal-mask';
+  mask.innerHTML = `<div class="modal"><div class="modal-head"><h3>${title}</h3><span class="x" id="modal-x">×</span></div><div class="modal-body">${bodyHTML}</div></div>`;
+  document.body.appendChild(mask);
+  $('#modal-x').onclick = closeModal;
+  mask.onclick = (e) => { if (e.target === mask) closeModal(); };
+  $$('[data-copy]', mask).forEach(b => b.onclick = () => copy(b.dataset.copy));
+}
+function closeModal() { const m = $('#modal-mask'); if (m) m.remove(); }
+
+// ============================================================
+// 启动
+// ============================================================
+function boot() {
+  renderShell();
+  connectSSE();
+  // 周期性同步状态（兜底，防 SSE 丢失）
+  setInterval(async () => {
+    if (!State.token) return;
+    try { const st = await api('GET', '/api/v1/speedtest/status'); applyStatus(st); if (State.page === 'dashboard') updateLiveUI(); } catch (_) {}
+  }, 15000);
+}
+
+window.addEventListener('hashchange', () => { const p = location.hash.replace('#', ''); if (p && p !== State.page) { State.page = p; renderPage(); } });
+
+async function init() {
+  if (!State.token) { renderLogin(); return; }
+  try { const j = await fetch('/api/v1/version', { headers: { 'Authorization': 'Bearer ' + State.token } }); if (!j.ok) throw 0; State.version = (await j.json()).data?.version || 'dev'; boot(); }
+  catch (_) { logout(); }
+}
+init();
+})();

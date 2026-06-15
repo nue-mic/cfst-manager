@@ -1,0 +1,8 @@
+/bin/
+/data/
+/tmp/
+*.exe
+*.tmp
+.env
+result.csv
+.DS_Store

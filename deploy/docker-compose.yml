@@ -1,0 +1,24 @@
+services:
+  cfst-manager:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: cfst-manager:latest
+    container_name: cfst-manager
+    restart: unless-stopped
+    ports:
+      - "18123:18123"
+    environment:
+      # 管理端令牌（强烈建议设置；留空则首启自动生成并打印到日志）
+      CFST_API_TOKEN: "${CFST_API_TOKEN:-}"
+      CFST_HTTP_ADDR: ":18123"
+      CFST_DATA_DIR: "/data"
+      CFST_CORS_ORIGINS: "${CFST_CORS_ORIGINS:-*}"
+      CFST_LOG_LEVEL: "${CFST_LOG_LEVEL:-info}"
+      # 公开模式：对外优选IP API 接受任意 key（便于旧客户端无缝迁移）
+      CFST_PUBLIC_OPEN: "${CFST_PUBLIC_OPEN:-false}"
+    volumes:
+      - cfst-data:/data
+
+volumes:
+  cfst-data:
