@@ -2,7 +2,7 @@
 package version
 
 // Number 为版本号，可通过 -ldflags "-X .../internal/version.Number=vX.Y.Z" 注入。
-var Number = "0.0.4"
+var Number = "0.0.5"
 
 // BuildDate 为构建日期，可经 ldflags 注入。
 var BuildDate = "unknown"
