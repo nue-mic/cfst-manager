@@ -1,8 +1,12 @@
 /bin/
 /data/
 /tmp/
+/dist/
+/dist-ipk/
+/openwrt-dist/
 *.exe
 *.tmp
+*.ipk
 .env
 result.csv
 .DS_Store

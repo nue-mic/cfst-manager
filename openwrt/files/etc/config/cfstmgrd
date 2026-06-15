@@ -1,0 +1,40 @@
+config cfstmgrd 'main'
+	# 服务的持久运行状态 (1=应运行/开机自起，0=应停止)。
+	# 这也是网页「启动/停止」按钮写入的状态：点停止→0，点启动→1。
+	# start_service 据此决定是否拉起，故重启/升级后都会保持上次的启停状态。
+	option enabled '1'
+	# 开机强制自启 (1/0)。默认 0=跟随上面的 enabled（停的保持停、开的保持开）。
+	# 设为 1 时：即使在网页点了「停止」，系统重启/升级后仍会强制自动启动。
+	option boot_autostart '0'
+	# 监听地址：可只填端口(如 18123，自动补为 :18123)，或 :端口 / ip:端口；
+	# IPv6 单地址须加方括号，如 [::1]:18123
+	option http_addr ':18123'
+	# API 登录令牌 (后台访问凭证)。留空时首次启动自动生成强随机令牌，
+	# 之后用 `uci get cfstmgrd.main.token` 查看。
+	option token ''
+	# 数据根目录 (历史记录/Profile/设置/meta.json/ip 源)。必须持久化路径，
+	# 切勿用 /var 或 /tmp (OpenWrt 上为 tmpfs，重启丢失)。
+	option data_dir '/usr/lib/cfstmgrd'
+	# 日志级别: trace|debug|info|warn|error
+	option log_level 'info'
+	# 是否开放 /api/docs 在线文档 (1/0)
+	option docs_enabled '1'
+	# CORS 白名单，逗号分隔或 *
+	option cors_origins '*'
+	# 对外优选 IP API 公开模式 (1/0)。1=接受任意 key，便于把旧的
+	# wetest/hostmonit 客户端无缝迁移到本服务（也可在网页「设置」里开）。
+	option public_open '0'
+
+	# --- 以下供 cfstmgrd-fetch 拉取二进制时使用（一般无需改）---
+	# 下载优先级：① 自建 gh-raw 源（首选）② 公共代理（兜底）③ GitHub 直连
+	#
+	# 指定要拉取的二进制版本；留空=随包版本(/usr/lib/cfstmgrd/VERSION)；填 latest=拉最新
+	# option version '1.1.0'
+	# 指定单一公共代理（跳过内置公共代理列表），形如 https://my.mirror/
+	# option download_proxy ''
+	# 设为 1 则跳过自建源 + 公共代理，直连 GitHub
+	option no_proxy '0'
+	# 覆盖内置自建 gh-raw 源域名列表（逗号分隔），一般无需改
+	# option release_proxy_bases 'https://gh-raw.966788.xyz,https://gh-raw.988669.xyz'
+	# 覆盖自建源资源键，一般无需改
+	# option install_proxy_key 'cfst-mgr-releases'

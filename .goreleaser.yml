@@ -1,0 +1,103 @@
+version: 2
+
+project_name: cfstmgrd
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: cfstmgrd
+    main: ./cmd/cfstmgrd
+    binary: cfstmgrd
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X github.com/mia-clark/cfst-manager/internal/version.Number={{.Version}}
+      - -X github.com/mia-clark/cfst-manager/internal/version.BuildDate={{.Date}}
+    # 显式目标清单。arm 用 goarm 后缀（v6/v7）；mips/mipsle 走 softfloat（软路由多无 FPU），
+    # mips64/mips64le 走 hardfloat；其余用默认微架构。资产名须与 cfstmgrd-fetch 的架构 token 对齐。
+    targets:
+      - linux_amd64
+      - linux_arm64
+      - linux_arm_6
+      - linux_arm_7
+      - linux_386
+      - linux_mips_softfloat
+      - linux_mipsle_softfloat
+      - linux_mips64_hardfloat
+      - linux_mips64le_hardfloat
+      - linux_riscv64
+      - linux_loong64
+      - darwin_amd64
+      - darwin_arm64
+      - windows_amd64
+      - windows_arm64
+      - windows_386
+      - freebsd_amd64
+      - freebsd_arm64
+
+archives:
+  - id: default
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}{{ with .Arm }}v{{ . }}{{ end }}
+    files:
+      - README.md
+      - LICENSE
+      - docs/API.zh-CN.md
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-dev+{{ .ShortCommit }}"
+
+changelog:
+  use: github
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "^ci:"
+      - "Merge pull request"
+      - "Merge branch"
+  groups:
+    - title: "Features"
+      regexp: '^.*?feat(\(.+\))??:.+$'
+      order: 0
+    - title: "Bug fixes"
+      regexp: '^.*?fix(\(.+\))??:.+$'
+      order: 1
+    - title: "Other"
+      order: 999
+
+release:
+  draft: false
+  prerelease: auto
+  mode: replace
+  github:
+    owner: mia-clark
+    name: cfst-manager
+  # OpenWrt ipk（单个 all 包）随发布一并上传。该 ipk 由 CI 在 goreleaser 之前
+  # 用 openwrt/build-ipk.sh 生成到 openwrt-dist/（见 .github/workflows/release.yml）。
+  extra_files:
+    - glob: ./openwrt-dist/*.ipk
+  header: |
+    ## cfstmgrd {{ .Tag }}
+
+    CDN 优选 IP 测速 Web 管理服务。Built from [`{{ .ShortCommit }}`](https://github.com/mia-clark/cfst-manager/commit/{{ .FullCommit }}).
+  footer: |
+    ---
+
+    Container image: `ghcr.io/mia-clark/cfst-manager:{{ .Version }}`
+    OpenWrt: 上传 `luci-app-cfstmgrd_{{ .Version }}-1_all.ipk` 到路由器 `opkg install` 即可。

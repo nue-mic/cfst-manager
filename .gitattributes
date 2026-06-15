@@ -1,0 +1,14 @@
+# 统一行尾为 LF：OpenWrt 的 /bin/sh 与 procd 脚本、Go、Lua、HTML 模板等
+# 一旦带 CRLF 会在路由器上报错（如 init.d 脚本无法执行）。
+* text=auto eol=lf
+
+# Windows 专用脚本保留 CRLF
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+
+# 二进制/图片不处理
+*.png binary
+*.jpg binary
+*.ico binary
+*.gz binary
+*.ipk binary
