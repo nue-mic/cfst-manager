@@ -80,9 +80,30 @@ function connectSSE() {
   es.onerror = () => { /* 浏览器自动重连 */ };
 }
 
-function pushLog(msg) {
-  State.live.logs.push({ ts: new Date().toLocaleTimeString('zh-CN', { hour12: false }), msg });
-  if (State.live.logs.length > 300) State.live.logs.shift();
+// 日志面板环形缓冲容量。调试模式下日志可能很密集，留足回看空间又不至于撑爆浏览器内存。
+const LOG_MAX = 1000;
+
+function pushLog(msg, level, tone) {
+  State.live.logs.push({ ts: new Date().toLocaleTimeString('zh-CN', { hour12: false }), msg, level: level || '', tone: tone || '' });
+  if (State.live.logs.length > LOG_MAX) State.live.logs.shift();
+}
+
+// 单条日志行 HTML。level=debug 标记调试行；tone=err/warn 对应上游终端的红/黄着色。
+function logLineHTML(l) {
+  const cls = ['line', l.level, l.tone].filter(Boolean).join(' ');
+  return `<div class="${cls}"><span class="ts">${l.ts}</span>${esc(l.msg)}</div>`;
+}
+
+// 增量追加一行到日志面板（避免调试刷屏时整块重渲染导致卡顿）。仅在仪表盘可见时操作 DOM。
+function appendLogLine() {
+  if (State.page !== 'dashboard') return;
+  const log = $('#live-log');
+  if (!log) return;
+  const l = State.live.logs[State.live.logs.length - 1];
+  if (!l) return;
+  log.insertAdjacentHTML('beforeend', logLineHTML(l));
+  while (log.childElementCount > LOG_MAX) log.removeChild(log.firstChild); // DOM 与环形缓冲容量保持一致
+  log.scrollTop = log.scrollHeight;
 }
 
 function applyStatus(d) {
@@ -126,8 +147,8 @@ function onEvent(type, d) {
       toast('测速已中止', 'warn');
       break;
     case 'log':
-      if (d.msg) pushLog(d.msg);
-      break;
+      if (d.msg) { pushLog(d.msg, d.level, d.tone); appendLogLine(); }
+      return; // 日志行已增量渲染，跳过整块重渲染（调试刷屏时显著降卡顿）
   }
   if (State.page === 'dashboard') updateLiveUI();
 }
@@ -217,7 +238,7 @@ function topbar(title, sub, actions = '') {
 // ============================================================
 // 页面：测速优选
 // ============================================================
-const ENGINE_DEFAULTS = { routines: 200, ping_times: 4, tcp_port: 443, httping: false, httping_status_code: 0, httping_cf_colo: '', test_count: 10, download_time: 10, url: 'https://speed.cloudflare.com/__down?bytes=50000000', min_speed: 0, disable: false, max_delay: 9999, min_delay: 0, max_loss_rate: 1, test_all: false };
+const ENGINE_DEFAULTS = { routines: 200, ping_times: 4, tcp_port: 443, httping: false, httping_status_code: 0, httping_cf_colo: '', test_count: 10, download_time: 10, url: 'https://speed.cloudflare.com/__down?bytes=50000000', min_speed: 0, disable: false, max_delay: 9999, min_delay: 0, max_loss_rate: 1, test_all: false, debug: false };
 
 // 下载测速地址预设。测速地址须托管在被优选的 CDN 上（优选 Cloudflare 就用 Cloudflare 地址），
 // 这样强制连候选 IP 才能测出该边缘真实速度。多备几个：大文件被限流时可换小的/换域名。
@@ -297,6 +318,10 @@ async function pageDashboard(main) {
             <label class="switch"><input type="checkbox" id="f-disable" ${def.disable ? 'checked' : ''}><span class="track"></span>禁用下载测速 -dd</label>
             <label class="switch"><input type="checkbox" id="f-test_all" ${def.test_all ? 'checked' : ''}><span class="track"></span>测速全部 IP -allip</label>
           </div>
+          <div class="row">
+            <label class="switch"><input type="checkbox" id="f-debug" ${def.debug ? 'checked' : ''}><span class="track"></span>调试输出 -debug</label>
+          </div>
+          <div class="desc">开启后，出现非预期情况时右侧「运行日志」会打印详细诊断（逐字移植自上游 -debug）。注意：上游 -debug 仅在 <b>HTTPing 延迟测速</b> 与 <b>下载测速</b> 阶段产生输出，默认的 TCPing 模式下只有下载阶段会有调试日志。</div>
         </details>
         <div class="field"><label>备注（可选）</label><input type="text" id="f-note" placeholder="给这次测速加个标签…"></div>
         <div class="flex">
@@ -341,7 +366,7 @@ function collectConfig() {
     test_count: num('f-test_count'), download_time: num('f-download_time'), url: v('f-url') || '',
     min_speed: num('f-min_speed'), disable: $('#f-disable').checked,
     max_delay: num('f-max_delay'), min_delay: num('f-min_delay'), max_loss_rate: num('f-max_loss_rate'),
-    test_all: $('#f-test_all').checked,
+    test_all: $('#f-test_all').checked, debug: $('#f-debug').checked,
   };
   const payload = Object.assign({}, cfg, { profile: v('f-profile'), note: v('f-note') || '' });
   if ($('input[name=ipmode]:checked').value === 'text') payload.ip_text = $('#f-iptext').value.trim();
@@ -408,7 +433,7 @@ function updateLiveUI() {
   }
 
   const log = $('#live-log');
-  if (log) { log.innerHTML = L.logs.map(l => `<div class="line"><span class="ts">${l.ts}</span>${esc(l.msg)}</div>`).join(''); log.scrollTop = log.scrollHeight; }
+  if (log) { log.innerHTML = L.logs.map(logLineHTML).join(''); log.scrollTop = log.scrollHeight; }
 
   const card = $('#result-card');
   if (card && L.lastFinish && L.lastFinish.top && L.lastFinish.top.length) {
@@ -536,6 +561,9 @@ function editSchedule(sc, profiles, sources) {
         <label class="switch"><input type="checkbox" id="sc-disable" ${c.disable ? 'checked' : ''}><span class="track"></span>禁用下载测速</label>
         <label class="switch"><input type="checkbox" id="sc-test_all" ${c.test_all ? 'checked' : ''}><span class="track"></span>测速全部 IP</label>
       </div>
+      <div class="row">
+        <label class="switch"><input type="checkbox" id="sc-debug" ${c.debug ? 'checked' : ''}><span class="track"></span>调试输出 -debug</label>
+      </div>
     </details>
     <div class="row">
       <label class="switch"><input type="checkbox" id="sc-publish" ${sc ? (sc.publish ? 'checked' : '') : 'checked'}><span class="track"></span>完成后发布到 Profile</label>
@@ -562,7 +590,7 @@ function editSchedule(sc, profiles, sources) {
         test_count: num('sc-test_count'), download_time: num('sc-download_time'), url: v('sc-url') || '',
         min_speed: num('sc-min_speed'), disable: $('#sc-disable').checked,
         max_delay: num('sc-max_delay'), min_delay: 0, max_loss_rate: num('sc-max_loss_rate'),
-        test_all: $('#sc-test_all').checked,
+        test_all: $('#sc-test_all').checked, debug: $('#sc-debug').checked,
       },
     };
     if ($('input[name=sc-ipmode]:checked').value === 'text') { body.ip_text = $('#sc-iptext').value.trim(); body.ip_source = ''; }

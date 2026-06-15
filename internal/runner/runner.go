@@ -174,6 +174,15 @@ func (r *Runner) execute(ctx context.Context, job *QueuedJob) {
 		r.bus.Publish(eventbus.EventRunProgress, p)
 	}
 
+	// 调试日志回调：仅当本次任务开启 -debug 时由引擎调用，逐条转发到事件总线 → SSE → 前端日志面板。
+	// 可能被多个测速 goroutine 并发调用；bus.Publish 自身并发安全，慢订阅者丢事件而非阻塞。
+	onLog := func(msg, tone string) {
+		if r.log != nil {
+			r.log.Debug("engine: " + msg) // slog 默认 Info 级，调试行默认被过滤，不污染服务端日志
+		}
+		r.bus.Publish(eventbus.EventLog, map[string]any{"msg": msg, "level": "debug", "tone": tone})
+	}
+
 	// 守护进程级保护：极端畸形 IP 输入理论上可能触发 panic，降级为一次"失败"记录。
 	var results []engine.Result
 	var err error
@@ -184,7 +193,7 @@ func (r *Runner) execute(ctx context.Context, job *QueuedJob) {
 				r.logf("测速引擎 panic 已捕获 run=%s: %v", job.RunID, rec)
 			}
 		}()
-		results, err = engine.Run(ctx, job.Config, onProgress)
+		results, err = engine.Run(ctx, job.Config, onProgress, onLog)
 	}()
 
 	finishedAt := time.Now().UTC()

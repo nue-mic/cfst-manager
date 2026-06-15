@@ -8,6 +8,7 @@ package engine
 
 import (
 	"context"
+	"fmt"
 	"time"
 )
 
@@ -61,6 +62,9 @@ type Config struct {
 	IPText  string `json:"ip_text"`  // -ip    直接指定 IP 段(逗号分隔)
 	IPFile  string `json:"ip_file"`  // -f     IP 段数据文件路径
 	TestAll bool   `json:"test_all"` // -allip 测速 IP 段内全部 IP(仅 IPv4)
+
+	// 调试
+	Debug bool `json:"debug"` // -debug 调试输出模式（出现非预期情况时输出更多诊断日志，逐字移植自上游）
 }
 
 // Normalize 用默认值补全非法/缺省字段，使引擎调用方无需逐项校验。
@@ -133,13 +137,17 @@ type Progress struct {
 // ProgressFunc 是进度回调；传 nil 表示不需要进度。
 type ProgressFunc func(Progress)
 
+// LogFunc 是调试日志回调。仅当 cfg.Debug 为真、且发生上游 -debug 所定义的诊断情形时被调用。
+// tone 用于前端着色，对应上游终端的彩色输出：err=红色(错误)、warn=黄色(提示)。传 nil 表示不需要日志。
+type LogFunc func(msg, tone string)
+
 // Run 执行一次完整测速：加载 IP 段 → 延迟测速 → 延迟/丢包过滤 → 下载测速 → 排序。
 // 通过 ctx 可随时取消；进度经 onProgress 上报；返回最终有序结果。
 //
 // 流程与 CFST 的 main() 等价：
 //
 //	NewPing().Run().FilterDelay().FilterLossRate() → TestDownloadSpeed → 排序
-func Run(ctx context.Context, cfg Config, onProgress ProgressFunc) ([]Result, error) {
+func Run(ctx context.Context, cfg Config, onProgress ProgressFunc, onLog LogFunc) ([]Result, error) {
 	cfg.Normalize()
 	if onProgress == nil {
 		onProgress = func(Progress) {}
@@ -148,6 +156,7 @@ func Run(ctx context.Context, cfg Config, onProgress ProgressFunc) ([]Result, er
 	r := &runner{
 		cfg:        cfg,
 		onProgress: onProgress,
+		onLog:      onLog,
 		colomap:    buildColoMap(cfg.HttpingCFColo),
 		maxDelay:   time.Duration(cfg.MaxDelay) * time.Millisecond,
 		minDelay:   time.Duration(cfg.MinDelay) * time.Millisecond,
@@ -184,9 +193,20 @@ func Run(ctx context.Context, cfg Config, onProgress ProgressFunc) ([]Result, er
 type runner struct {
 	cfg        Config
 	onProgress ProgressFunc
+	onLog      LogFunc
 	colomap    map[string]struct{} // -cfcolo 解析后的地区集合; nil 表示不过滤
 	maxDelay   time.Duration
 	minDelay   time.Duration
 	maxLoss    float32
 	timeout    time.Duration
+}
+
+// debugf 是上游 `if utils.Debug { utils.Xxx.Printf(...) }` 的等价管道：仅在调试模式下，
+// 把一条诊断日志（文案逐字照搬上游，去掉行尾换行——每条即一行）经回调送往 Web 日志面板。
+// tone 对应上游的终端颜色：err=红、warn=黄。可被多个测速 goroutine 并发调用（回调侧自行保证并发安全）。
+func (r *runner) debugf(tone, format string, args ...any) {
+	if !r.cfg.Debug || r.onLog == nil {
+		return
+	}
+	r.onLog(fmt.Sprintf(format, args...), tone)
 }

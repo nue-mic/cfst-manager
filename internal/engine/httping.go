@@ -1,7 +1,8 @@
 package engine
 
 // 移植自 XIU2/CloudflareSpeedTest task/httping.go (GPL-3.0)。
-// 改动：去全局化（参数取自 runner.cfg / runner.colomap）、支持 ctx、移除 log.Fatal。
+// 改动：去全局化（参数取自 runner.cfg / runner.colomap）、支持 ctx、移除 log.Fatal；
+// 上游 -debug 调试输出逐字保留，仅由终端改走 LogFunc 回调。
 
 import (
 	"context"
@@ -55,11 +56,13 @@ func (r *runner) httping(ctx context.Context, ip *net.IPAddr) (int, time.Duratio
 	{
 		req, err := http.NewRequestWithContext(ctx, http.MethodHead, r.cfg.URL, nil)
 		if err != nil {
+			r.debugf("err", "[调试] IP: %s, 延迟测速请求创建失败，错误信息: %v, 测速地址: %s", ip.String(), err, r.cfg.URL)
 			return 0, 0, ""
 		}
 		req.Header.Set("User-Agent", userAgent)
 		resp, err := hc.Do(req)
 		if err != nil {
+			r.debugf("err", "[调试] IP: %s, 延迟测速失败，错误信息: %v, 测速地址: %s", ip.String(), err, r.cfg.URL)
 			return 0, 0, ""
 		}
 		defer resp.Body.Close()
@@ -70,9 +73,11 @@ func (r *runner) httping(ctx context.Context, ip *net.IPAddr) (int, time.Duratio
 		code := r.cfg.HttpingStatusCode
 		if code == 0 || code < 100 || code > 599 {
 			if resp.StatusCode != 200 && resp.StatusCode != 301 && resp.StatusCode != 302 {
+				r.debugf("err", "[调试] IP: %s, 延迟测速终止，HTTP 状态码: %d, 测速地址: %s", ip.String(), resp.StatusCode, r.cfg.URL)
 				return 0, 0, ""
 			}
 		} else if resp.StatusCode != code {
+			r.debugf("err", "[调试] IP: %s, 延迟测速终止，HTTP 状态码: %d, 指定的 HTTP 状态码 %d, 测速地址: %s", ip.String(), resp.StatusCode, code, r.cfg.URL)
 			return 0, 0, ""
 		}
 
@@ -83,6 +88,8 @@ func (r *runner) httping(ctx context.Context, ip *net.IPAddr) (int, time.Duratio
 		if r.colomap != nil {
 			colo = r.filterColo(colo)
 			if colo == "" {
+				// 与上游一致：此处 colo 已被 filterColo 覆盖为空，故输出的地区码恒为空字符串。
+				r.debugf("err", "[调试] IP: %s, 地区码不匹配: %s", ip.String(), colo)
 				return 0, 0, ""
 			}
 		}

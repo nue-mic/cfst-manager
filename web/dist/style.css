@@ -154,6 +154,10 @@ hr.sep { border: none; border-top: 1px solid var(--border); margin: 16px 0; }
 .logbox { background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px 12px; height: 150px; overflow-y: auto; font-family: "SF Mono", Consolas, monospace; font-size: 12px; color: var(--text-2); }
 .logbox .line { padding: 1px 0; }
 .logbox .ts { color: var(--text-3); margin-right: 8px; }
+/* 调试日志行（-debug）：长行（含 URL）自动换行；tone 对应上游终端的红/黄着色。 */
+.logbox .line.debug { white-space: pre-wrap; word-break: break-all; }
+.logbox .line.debug.err { color: var(--err); }
+.logbox .line.debug.warn { color: var(--warn); }
 
 /* 登录 */
 .login-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; }
