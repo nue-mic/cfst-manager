@@ -152,8 +152,9 @@ jobs:
         run: |
           go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
           export PATH="$(go env GOPATH)/bin:$PATH"
-          chmod +x openwrt/build-ipk.sh
-          ./openwrt/build-ipk.sh --version "${{ needs.bump.outputs.version }}" --out openwrt-dist
+          # build-ipk.sh 已在 git 中带可执行位，直接用 bash 调用，避免任何 chmod 改动
+          # 工作树触发 goreleaser 的 dirty 校验失败。
+          bash openwrt/build-ipk.sh --version "${{ needs.bump.outputs.version }}" --out openwrt-dist
           ls -la openwrt-dist
 
       - uses: goreleaser/goreleaser-action@v6
