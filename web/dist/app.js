@@ -407,6 +407,152 @@ function resultTableHTML(rows) {
 }
 
 // ============================================================
+// 页面：定时任务
+// ============================================================
+const SPEC_PRESETS = [
+  { v: '@every 30m', t: '每 30 分钟' },
+  { v: '@every 1h', t: '每小时' },
+  { v: '@every 6h', t: '每 6 小时' },
+  { v: '0 */6 * * *', t: '每 6 小时整点 (0/6/12/18:00)' },
+  { v: '0 3 * * *', t: '每天 03:00' },
+  { v: '0 4 * * 1', t: '每周一 04:00' },
+];
+
+async function pageSchedules(main) {
+  const [data, profiles, sources] = await Promise.all([
+    api('GET', '/api/v1/schedules'),
+    api('GET', '/api/v1/profiles'),
+    api('GET', '/api/v1/ipsources'),
+  ]);
+  const schedules = data.schedules || [];
+  const nextRuns = data.next_runs || {};
+  main.innerHTML = topbar('定时任务', '按计划自动测速并发布。所有任务共用一个串行队列，一次只跑一个，其余排队等待。',
+    `<button class="btn btn-primary" id="add-sch">+ 新建定时任务</button>`) + `
+    <div class="card mb0">${schedules.length === 0 ? emptyHTML('暂无定时任务', '点击右上角新建，例如「每 6 小时优选一次」') : `
+      <div class="table-wrap"><table>
+        <thead><tr><th>名称</th><th>计划</th><th>下次运行</th><th>Profile</th><th>发布</th><th>最近结果</th><th>状态</th><th>操作</th></tr></thead>
+        <tbody>${schedules.map(s => rowSchedule(s, nextRuns[s.id])).join('')}</tbody>
+      </table></div>`}</div>`;
+  $('#add-sch').onclick = () => editSchedule(null, profiles, sources);
+  $$('[data-sc-edit]').forEach(b => b.onclick = () => editSchedule(schedules.find(x => x.id === b.dataset.scEdit), profiles, sources));
+  $$('[data-sc-run]').forEach(b => b.onclick = async () => { try { await api('POST', `/api/v1/schedules/${b.dataset.scRun}/run`); toast('已触发（进入队列）', 'ok'); renderPage(); } catch (e) { toast(e.message, 'warn'); } });
+  $$('[data-sc-del]').forEach(b => b.onclick = async () => { if (confirm('删除该定时任务？')) { try { await api('DELETE', '/api/v1/schedules/' + b.dataset.scDel); toast('已删除', 'ok'); renderPage(); } catch (e) { toast(e.message, 'err'); } } });
+  $$('[data-sc-toggle]').forEach(b => b.onclick = async () => { try { await api('POST', `/api/v1/schedules/${b.dataset.scToggle}/toggle`, { enabled: b.dataset.en !== 'true' }); renderPage(); } catch (e) { toast(e.message, 'err'); } });
+}
+
+function rowSchedule(s, next) {
+  const last = s.last_status ? statusBadge(s.last_status) : '<span class="muted">—</span>';
+  return `<tr>
+    <td><b>${esc(s.name)}</b>${s.note ? `<br><span class="tag">${esc(s.note)}</span>` : ''}</td>
+    <td><span class="mono">${esc(s.spec)}</span></td>
+    <td>${s.enabled ? (next ? fmtTime(next) : '<span class="muted">计算中…</span>') : '<span class="muted">已停用</span>'}</td>
+    <td><span class="tag">${esc(s.profile)}</span></td>
+    <td>${s.publish ? '<span class="badge ok">是</span>' : '<span class="badge muted">否</span>'}</td>
+    <td>${last}${s.last_run_at ? `<br><span class="muted" style="font-size:11px">${fmtTime(s.last_run_at)}</span>` : ''}</td>
+    <td>${s.enabled ? '<span class="badge ok">启用</span>' : '<span class="badge muted">停用</span>'}</td>
+    <td><div class="flex">
+      <button class="btn btn-sm" data-sc-run="${s.id}">立即运行</button>
+      <button class="btn btn-sm" data-sc-edit="${s.id}">编辑</button>
+      <button class="btn btn-sm" data-sc-toggle="${s.id}" data-en="${s.enabled}">${s.enabled ? '停用' : '启用'}</button>
+      <button class="btn btn-sm btn-danger" data-sc-del="${s.id}">删除</button>
+    </div></td></tr>`;
+}
+
+function editSchedule(sc, profiles, sources) {
+  const isNew = !sc;
+  const c = Object.assign({}, ENGINE_DEFAULTS, (sc && sc.config) || {});
+  const useText = !!(sc && sc.ip_text);
+  modal(isNew ? '新建定时任务' : `编辑定时任务 · ${esc(sc.name)}`, `
+    <div class="row">
+      <div class="field"><label>任务名称</label><input type="text" id="sc-name" value="${esc(sc ? sc.name : '')}" placeholder="例如：每日优选"></div>
+      <div class="field"><label>目标 Profile</label><select id="sc-profile">${profiles.map(p => `<option value="${esc(p.name)}" ${sc && sc.profile === p.name ? 'selected' : ''}>${esc(p.title || p.name)}</option>`).join('')}</select></div>
+    </div>
+    <div class="field">
+      <label>运行计划（cron 表达式 / 描述符）</label>
+      <div class="row" style="margin-bottom:8px">
+        <select id="sc-preset"><option value="">— 选择预设填入 —</option>${SPEC_PRESETS.map(p => `<option value="${p.v}">${p.t} (${p.v})</option>`).join('')}</select>
+      </div>
+      <input type="text" id="sc-spec" value="${esc(sc ? sc.spec : '@every 6h')}" placeholder="如 @every 6h 或 0 */6 * * *">
+      <div class="desc">支持标准 5 段 cron（分 时 日 月 周）或描述符 @every 30m / @hourly / @daily。</div>
+    </div>
+    <div class="field">
+      <label>IP 来源</label>
+      <div class="row" style="margin-bottom:8px">
+        <label class="radio"><input type="radio" name="sc-ipmode" value="file" ${useText ? '' : 'checked'}>选择 IP 源文件</label>
+        <label class="radio"><input type="radio" name="sc-ipmode" value="text" ${useText ? 'checked' : ''}>手动输入 IP 段</label>
+      </div>
+      <select id="sc-ipsource" style="${useText ? 'display:none' : ''}">${sources.map(s => `<option value="${esc(s.name)}" ${sc && sc.ip_source === s.name ? 'selected' : ''}>${esc(s.name)} (${s.lines} 段)</option>`).join('')}</select>
+      <textarea id="sc-iptext" style="${useText ? '' : 'display:none'}" placeholder="1.1.1.1, 104.16.0.0/24">${esc(sc ? sc.ip_text : '')}</textarea>
+    </div>
+    <div class="row">
+      <div class="field"><label>测速模式</label><select id="sc-httping"><option value="false" ${c.httping ? '' : 'selected'}>TCPing</option><option value="true" ${c.httping ? 'selected' : ''}>HTTPing</option></select></div>
+      <div class="field"><label>测速端口</label><input type="number" id="sc-tcp_port" value="${c.tcp_port}"></div>
+    </div>
+    <details><summary style="cursor:pointer;color:var(--text-2);margin:6px 0 12px">⚙️ 高级参数</summary>
+      <div class="row">
+        <div class="field"><label>延迟线程 -n</label><input type="number" id="sc-routines" value="${c.routines}"></div>
+        <div class="field"><label>延迟次数 -t</label><input type="number" id="sc-ping_times" value="${c.ping_times}"></div>
+      </div>
+      <div class="row">
+        <div class="field"><label>下载数量 -dn</label><input type="number" id="sc-test_count" value="${c.test_count}"></div>
+        <div class="field"><label>下载时间(秒) -dt</label><input type="number" id="sc-download_time" value="${c.download_time}"></div>
+      </div>
+      <div class="field"><label>测速地址 -url</label><input type="text" id="sc-url" value="${esc(c.url)}"></div>
+      <div class="row">
+        <div class="field"><label>速度下限 MB/s -sl</label><input type="number" step="0.1" id="sc-min_speed" value="${c.min_speed}"></div>
+        <div class="field"><label>延迟上限 ms -tl</label><input type="number" id="sc-max_delay" value="${c.max_delay}"></div>
+      </div>
+      <div class="row">
+        <div class="field"><label>丢包率上限 -tlr</label><input type="number" step="0.01" id="sc-max_loss_rate" value="${c.max_loss_rate}"></div>
+        <div class="field"><label>匹配地区 -cfcolo</label><input type="text" id="sc-httping_cf_colo" value="${esc(c.httping_cf_colo)}"></div>
+      </div>
+      <div class="row">
+        <label class="switch"><input type="checkbox" id="sc-disable" ${c.disable ? 'checked' : ''}><span class="track"></span>禁用下载测速</label>
+        <label class="switch"><input type="checkbox" id="sc-test_all" ${c.test_all ? 'checked' : ''}><span class="track"></span>测速全部 IP</label>
+      </div>
+    </details>
+    <div class="row">
+      <label class="switch"><input type="checkbox" id="sc-publish" ${sc ? (sc.publish ? 'checked' : '') : 'checked'}><span class="track"></span>完成后发布到 Profile</label>
+      <label class="switch"><input type="checkbox" id="sc-enabled" ${sc ? (sc.enabled ? 'checked' : '') : 'checked'}><span class="track"></span>启用</label>
+    </div>
+    <div class="field"><label>备注</label><input type="text" id="sc-note" value="${esc(sc ? sc.note : '')}"></div>
+    <button class="btn btn-primary" id="sc-save">保存</button>`);
+
+  $('#sc-preset').onchange = (e) => { if (e.target.value) $('#sc-spec').value = e.target.value; };
+  $$('input[name=sc-ipmode]').forEach(r => r.onchange = () => {
+    const file = $('input[name=sc-ipmode]:checked').value === 'file';
+    $('#sc-ipsource').style.display = file ? '' : 'none';
+    $('#sc-iptext').style.display = file ? 'none' : '';
+  });
+  $('#sc-save').onclick = async () => {
+    const v = (id) => $('#' + id).value;
+    const num = (id) => Number(v(id));
+    const body = {
+      name: v('sc-name').trim(), spec: v('sc-spec').trim(), profile: v('sc-profile'),
+      note: v('sc-note'), publish: $('#sc-publish').checked, enabled: $('#sc-enabled').checked,
+      config: {
+        routines: num('sc-routines'), ping_times: num('sc-ping_times'), tcp_port: num('sc-tcp_port'),
+        httping: v('sc-httping') === 'true', httping_cf_colo: v('sc-httping_cf_colo') || '', httping_status_code: 0,
+        test_count: num('sc-test_count'), download_time: num('sc-download_time'), url: v('sc-url') || '',
+        min_speed: num('sc-min_speed'), disable: $('#sc-disable').checked,
+        max_delay: num('sc-max_delay'), min_delay: 0, max_loss_rate: num('sc-max_loss_rate'),
+        test_all: $('#sc-test_all').checked,
+      },
+    };
+    if ($('input[name=sc-ipmode]:checked').value === 'text') { body.ip_text = $('#sc-iptext').value.trim(); body.ip_source = ''; }
+    else { body.ip_source = $('#sc-ipsource').value; body.ip_text = ''; }
+    if (!body.name) return toast('请输入任务名称', 'warn');
+    if (!body.spec) return toast('请输入运行计划', 'warn');
+    if (body.ip_text === '' && body.ip_source === '') return toast('请选择 IP 源或输入 IP 段', 'warn');
+    try {
+      if (isNew) await api('POST', '/api/v1/schedules', body);
+      else await api('PUT', '/api/v1/schedules/' + sc.id, body);
+      toast('已保存', 'ok'); closeModal(); renderPage();
+    } catch (e) { toast(e.message, 'err'); }
+  };
+}
+
+// ============================================================
 // 页面：历史记录
 // ============================================================
 async function pageHistory(main) {
