@@ -219,6 +219,26 @@ function topbar(title, sub, actions = '') {
 // ============================================================
 const ENGINE_DEFAULTS = { routines: 200, ping_times: 4, tcp_port: 443, httping: false, httping_status_code: 0, httping_cf_colo: '', test_count: 10, download_time: 10, url: 'https://speed.cloudflare.com/__down?bytes=200000000', min_speed: 0, disable: false, max_delay: 9999, min_delay: 0, max_loss_rate: 1, test_all: false };
 
+// 下载测速地址预设。测速地址须托管在被优选的 CDN 上（优选 Cloudflare 就用 Cloudflare 地址），
+// 这样强制连候选 IP 才能测出该边缘真实速度。多备几个：大文件被限流时可换小的/换域名。
+// speed.cloudflare.com 是 Cloudflare 官方测速基础设施，最稳；公共地址都可能限额，最稳是自建(CF Workers)。
+const SPEED_URL_PRESETS = [
+  { v: 'https://speed.cloudflare.com/__down?bytes=200000000', t: 'Cloudflare 官方 · 200MB（快速链路·推荐）' },
+  { v: 'https://speed.cloudflare.com/__down?bytes=100000000', t: 'Cloudflare 官方 · 100MB（通用）' },
+  { v: 'https://speed.cloudflare.com/__down?bytes=50000000',  t: 'Cloudflare 官方 · 50MB（慢速链路/快速测试）' },
+  { v: 'https://speed.cloudflare.com/__down?bytes=10000000',  t: 'Cloudflare 官方 · 10MB（低带宽/路由器）' },
+  { v: 'https://cloudflaremirrors.com/archlinux/iso/latest/archlinux-x86_64.iso', t: 'Cloudflare 镜像站（备用·不同域名·大文件）' },
+  { v: 'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js', t: 'cdnjs（Cloudflare 备用·小文件/连通性）' },
+  { v: 'https://d7uri8nf7uskq.cloudfront.net/tools/list-cloudfront-ips', t: 'AWS CloudFront 官方（供 CloudFront 优选）' },
+];
+// 生成「预设下拉」HTML：选中即把值填入 targetId 输入框（保留手动自定义）。
+function urlPresetSelect(targetId) {
+  return `<select onchange="if(this.value){var el=document.getElementById('${targetId}');el.value=this.value;el.dispatchEvent(new Event('change'))}">
+    <option value="">— 选择测速地址预设填入 —</option>
+    ${SPEED_URL_PRESETS.map(p => `<option value="${esc(p.v)}">${esc(p.t)}</option>`).join('')}
+  </select>`;
+}
+
 async function pageDashboard(main) {
   let profiles = [], sources = [], settings = {};
   try { [profiles, sources, settings] = await Promise.all([api('GET', '/api/v1/profiles'), api('GET', '/api/v1/ipsources'), api('GET', '/api/v1/settings')]); } catch (_) {}
@@ -257,7 +277,11 @@ async function pageDashboard(main) {
             <div class="field"><label>下载测速数量 -dn</label><input type="number" id="f-test_count" value="${def.test_count}"></div>
             <div class="field"><label>下载测速时间(秒) -dt</label><input type="number" id="f-download_time" value="${def.download_time}"></div>
           </div>
-          <div class="field"><label>测速地址 -url</label><input type="text" id="f-url" value="${esc(def.url)}"></div>
+          <div class="field"><label>测速地址 -url</label>
+            <div style="margin-bottom:8px">${urlPresetSelect('f-url')}</div>
+            <input type="text" id="f-url" value="${esc(def.url)}">
+            <div class="desc">下拉选预设自动填入，也可手动填自建地址。地址须托管在被优选的 CDN 上（优选 Cloudflare 用 Cloudflare 地址）。多备几个：限流/失效时可换。</div>
+          </div>
           <div class="row">
             <div class="field"><label>下载速度下限(MB/s) -sl</label><input type="number" step="0.1" id="f-min_speed" value="${def.min_speed}"></div>
             <div class="field"><label>丢包率上限 -tlr</label><input type="number" step="0.01" id="f-max_loss_rate" value="${def.max_loss_rate}"></div>
@@ -497,7 +521,10 @@ function editSchedule(sc, profiles, sources) {
         <div class="field"><label>下载数量 -dn</label><input type="number" id="sc-test_count" value="${c.test_count}"></div>
         <div class="field"><label>下载时间(秒) -dt</label><input type="number" id="sc-download_time" value="${c.download_time}"></div>
       </div>
-      <div class="field"><label>测速地址 -url</label><input type="text" id="sc-url" value="${esc(c.url)}"></div>
+      <div class="field"><label>测速地址 -url</label>
+        <div style="margin-bottom:8px">${urlPresetSelect('sc-url')}</div>
+        <input type="text" id="sc-url" value="${esc(c.url)}">
+      </div>
       <div class="row">
         <div class="field"><label>速度下限 MB/s -sl</label><input type="number" step="0.1" id="sc-min_speed" value="${c.min_speed}"></div>
         <div class="field"><label>延迟上限 ms -tl</label><input type="number" id="sc-max_delay" value="${c.max_delay}"></div>
