@@ -9,10 +9,10 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/mia-clark/cfst-manager/internal/api/apiresp"
-	"github.com/mia-clark/cfst-manager/internal/engine"
-	"github.com/mia-clark/cfst-manager/internal/runner"
-	"github.com/mia-clark/cfst-manager/internal/store"
+	"github.com/nue-mic/cfst-manager/internal/api/apiresp"
+	"github.com/nue-mic/cfst-manager/internal/engine"
+	"github.com/nue-mic/cfst-manager/internal/runner"
+	"github.com/nue-mic/cfst-manager/internal/store"
 )
 
 // startReq 是开始测速的请求体：内嵌全部引擎参数 + 目标 profile + 备注 + IP 源选择。

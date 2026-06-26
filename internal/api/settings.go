@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/mia-clark/cfst-manager/internal/api/apiresp"
-	"github.com/mia-clark/cfst-manager/internal/store"
+	"github.com/nue-mic/cfst-manager/internal/api/apiresp"
+	"github.com/nue-mic/cfst-manager/internal/store"
 )
 
 // GetSettings 返回全局设置。

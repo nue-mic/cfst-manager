@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mia-clark/cfst-manager/internal/engine"
+	"github.com/nue-mic/cfst-manager/internal/engine"
 )
 
 // Schedule 是一个定时测速任务。Spec 支持标准 5 段 cron 或 @every/@daily 等描述符。

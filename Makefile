@@ -1,5 +1,5 @@
 BINARY := cfstmgrd
-PKG    := github.com/mia-clark/cfst-manager
+PKG    := github.com/nue-mic/cfst-manager
 VERSION ?= dev
 BUILD_DATE := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 LDFLAGS := -s -w -X $(PKG)/internal/version.Number=$(VERSION) -X $(PKG)/internal/version.BuildDate=$(BUILD_DATE)

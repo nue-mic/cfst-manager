@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/mia-clark/cfst-manager/internal/eventbus"
+	"github.com/nue-mic/cfst-manager/internal/eventbus"
 )
 
 // Events 是 SSE 端点：把测速进度/状态/日志实时推给浏览器 EventSource。

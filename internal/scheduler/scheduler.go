@@ -10,8 +10,8 @@ import (
 
 	"github.com/robfig/cron/v3"
 
-	"github.com/mia-clark/cfst-manager/internal/runner"
-	"github.com/mia-clark/cfst-manager/internal/store"
+	"github.com/nue-mic/cfst-manager/internal/runner"
+	"github.com/nue-mic/cfst-manager/internal/store"
 )
 
 // Scheduler 管理全部定时任务的 cron 注册。

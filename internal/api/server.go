@@ -9,13 +9,13 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/mia-clark/cfst-manager/internal/api/middleware"
-	"github.com/mia-clark/cfst-manager/internal/appcfg"
-	"github.com/mia-clark/cfst-manager/internal/eventbus"
-	"github.com/mia-clark/cfst-manager/internal/runner"
-	"github.com/mia-clark/cfst-manager/internal/scheduler"
-	"github.com/mia-clark/cfst-manager/internal/store"
-	"github.com/mia-clark/cfst-manager/web"
+	"github.com/nue-mic/cfst-manager/internal/api/middleware"
+	"github.com/nue-mic/cfst-manager/internal/appcfg"
+	"github.com/nue-mic/cfst-manager/internal/eventbus"
+	"github.com/nue-mic/cfst-manager/internal/runner"
+	"github.com/nue-mic/cfst-manager/internal/scheduler"
+	"github.com/nue-mic/cfst-manager/internal/store"
+	"github.com/nue-mic/cfst-manager/web"
 )
 
 // Deps 汇集处理器所需的协作者。

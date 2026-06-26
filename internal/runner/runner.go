@@ -10,9 +10,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mia-clark/cfst-manager/internal/engine"
-	"github.com/mia-clark/cfst-manager/internal/eventbus"
-	"github.com/mia-clark/cfst-manager/internal/store"
+	"github.com/nue-mic/cfst-manager/internal/engine"
+	"github.com/nue-mic/cfst-manager/internal/eventbus"
+	"github.com/nue-mic/cfst-manager/internal/store"
 )
 
 // SubmitOpts 是提交一个测速任务的参数。

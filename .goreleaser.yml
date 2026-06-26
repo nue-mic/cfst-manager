@@ -16,8 +16,8 @@ builds:
       - -trimpath
     ldflags:
       - -s -w
-      - -X github.com/mia-clark/cfst-manager/internal/version.Number={{.Version}}
-      - -X github.com/mia-clark/cfst-manager/internal/version.BuildDate={{.Date}}
+      - -X github.com/nue-mic/cfst-manager/internal/version.Number={{.Version}}
+      - -X github.com/nue-mic/cfst-manager/internal/version.BuildDate={{.Date}}
     # 显式目标清单。arm 用 goarm 后缀（v6/v7）；mips/mipsle 走 softfloat（软路由多无 FPU），
     # mips64/mips64le 走 hardfloat；其余用默认微架构。资产名须与 cfstmgrd-fetch 的架构 token 对齐。
     targets:

@@ -8,7 +8,7 @@ COPY . .
 ARG VERSION=docker
 ARG BUILD_DATE=unknown
 RUN CGO_ENABLED=0 go build -trimpath \
-    -ldflags "-s -w -X github.com/mia-clark/cfst-manager/internal/version.Number=${VERSION} -X github.com/mia-clark/cfst-manager/internal/version.BuildDate=${BUILD_DATE}" \
+    -ldflags "-s -w -X github.com/nue-mic/cfst-manager/internal/version.Number=${VERSION} -X github.com/nue-mic/cfst-manager/internal/version.BuildDate=${BUILD_DATE}" \
     -o /out/cfstmgrd ./cmd/cfstmgrd
 
 # ---------- 运行阶段 ----------

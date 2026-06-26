@@ -1,4 +1,4 @@
-module github.com/mia-clark/cfst-manager
+module github.com/nue-mic/cfst-manager
 
 go 1.25.0
 

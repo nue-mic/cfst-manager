@@ -12,9 +12,9 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/mia-clark/cfst-manager/internal/appcfg"
-	"github.com/mia-clark/cfst-manager/internal/engine"
-	"github.com/mia-clark/cfst-manager/internal/store"
+	"github.com/nue-mic/cfst-manager/internal/appcfg"
+	"github.com/nue-mic/cfst-manager/internal/engine"
+	"github.com/nue-mic/cfst-manager/internal/store"
 )
 
 func setupHandlers(t *testing.T) (*Handlers, *store.Store) {

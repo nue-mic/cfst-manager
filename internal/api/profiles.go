@@ -6,8 +6,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/mia-clark/cfst-manager/internal/api/apiresp"
-	"github.com/mia-clark/cfst-manager/internal/store"
+	"github.com/nue-mic/cfst-manager/internal/api/apiresp"
+	"github.com/nue-mic/cfst-manager/internal/store"
 )
 
 // ListProfiles 列出全部 CDN Profile。

@@ -7,10 +7,10 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/mia-clark/cfst-manager/internal/api/apiresp"
-	"github.com/mia-clark/cfst-manager/internal/engine"
-	"github.com/mia-clark/cfst-manager/internal/scheduler"
-	"github.com/mia-clark/cfst-manager/internal/store"
+	"github.com/nue-mic/cfst-manager/internal/api/apiresp"
+	"github.com/nue-mic/cfst-manager/internal/engine"
+	"github.com/nue-mic/cfst-manager/internal/scheduler"
+	"github.com/nue-mic/cfst-manager/internal/store"
 )
 
 // scheduleReq 是定时任务的创建/更新请求体。

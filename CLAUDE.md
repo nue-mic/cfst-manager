@@ -6,7 +6,7 @@
 
 ## 模块与构建
 
-- 模块路径：`github.com/mia-clark/cfst-manager`，守护进程 `cfstmgrd`。
+- 模块路径：`github.com/nue-mic/cfst-manager`，守护进程 `cfstmgrd`。
 - 构建：`make build`（输出 `bin/cfstmgrd`）；运行 `make run`；`go vet ./...`；`go test ./...`。
 - Go 1.25+。依赖极简：`go-chi/chi`（路由）、`VividCortex/ewma`（下载测速 EWMA）。前端内嵌于 `web/dist`，无构建链。
 

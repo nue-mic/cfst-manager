@@ -13,13 +13,13 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/mia-clark/cfst-manager/internal/api"
-	"github.com/mia-clark/cfst-manager/internal/appcfg"
-	"github.com/mia-clark/cfst-manager/internal/eventbus"
-	"github.com/mia-clark/cfst-manager/internal/runner"
-	"github.com/mia-clark/cfst-manager/internal/scheduler"
-	"github.com/mia-clark/cfst-manager/internal/store"
-	"github.com/mia-clark/cfst-manager/internal/version"
+	"github.com/nue-mic/cfst-manager/internal/api"
+	"github.com/nue-mic/cfst-manager/internal/appcfg"
+	"github.com/nue-mic/cfst-manager/internal/eventbus"
+	"github.com/nue-mic/cfst-manager/internal/runner"
+	"github.com/nue-mic/cfst-manager/internal/scheduler"
+	"github.com/nue-mic/cfst-manager/internal/store"
+	"github.com/nue-mic/cfst-manager/internal/version"
 )
 
 func main() {

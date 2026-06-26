@@ -22,7 +22,7 @@
 # =============================================================================
 set -eu
 
-REPO="mia-clark/cfst-manager"
+REPO="nue-mic/cfst-manager"
 BIN_NAME="cfstmgrd"
 INSTALL_DIR="/usr/bin"
 LIBDIR="/usr/lib/cfstmgrd"

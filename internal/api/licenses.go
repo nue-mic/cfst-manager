@@ -6,7 +6,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/mia-clark/cfst-manager/internal/api/apiresp"
+	"github.com/nue-mic/cfst-manager/internal/api/apiresp"
 )
 
 // ListLicenses 列出对外授权密钥。

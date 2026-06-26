@@ -11,8 +11,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/mia-clark/cfst-manager/internal/api/apiresp"
-	"github.com/mia-clark/cfst-manager/internal/store"
+	"github.com/nue-mic/cfst-manager/internal/api/apiresp"
+	"github.com/nue-mic/cfst-manager/internal/store"
 )
 
 // ListRuns 列出历史测速摘要。?profile= 可过滤。

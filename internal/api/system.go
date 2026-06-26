@@ -3,7 +3,7 @@ package api
 import (
 	"net/http"
 
-	"github.com/mia-clark/cfst-manager/internal/api/apiresp"
+	"github.com/nue-mic/cfst-manager/internal/api/apiresp"
 )
 
 // Health 健康探针（无需鉴权）。
